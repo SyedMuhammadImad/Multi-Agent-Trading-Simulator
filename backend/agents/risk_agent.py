@@ -418,6 +418,9 @@ class RiskManagementAgent(BaseAgent):
 
     async def _handle_emergency_close(self, payload: dict) -> None:
         logger.critical(f"EMERGENCY CLOSE ALL: {payload.get('reason')}")
+        if payload.get("emergency"):
+            self._kill_switch_active = True
+            return
         if self._kill_switch_active:
             return
         await self._activate_kill_switch(payload.get("reason", "Emergency closure"))

@@ -289,6 +289,7 @@ class ExecutionAgent(BaseAgent):
         )
 
     async def _handle_rejection(self, order: Order, reason: str) -> None:
+        order.status = OrderStatus.REJECTED
         if order.symbol in self._active_orders:
             del self._active_orders[order.symbol]
         await self.publish(

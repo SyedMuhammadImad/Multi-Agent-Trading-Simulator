@@ -1,0 +1,73 @@
+import pytest
+
+from agents.risk_agent import RiskManagementAgent, RiskParameters
+from core.event_bus import Event, EventType
+
+
+def order_request(price, symbol="BTC-USD", action="EXECUTE_BUY"):
+    return Event(
+        event_type=EventType.ORDER_REQUESTED,
+        source_agent="test",
+        payload={
+            "symbol": symbol,
+            "action": action,
+            "confidence": 0.9,
+            "price": price,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_risk_agent_rejects_missing_or_zero_price_without_silent_fallback():
+    agent = RiskManagementAgent()
+    published = []
+
+    async def capture(event_type, payload, priority=5, correlation_id=None):
+        published.append((event_type, payload, priority, correlation_id))
+
+    agent.publish = capture
+
+    await agent._evaluate_order_request(order_request(0))
+
+    assert published == []
+
+
+@pytest.mark.asyncio
+async def test_risk_agent_uses_flat_order_price_for_sizing():
+    agent = RiskManagementAgent()
+    published = []
+
+    async def capture(event_type, payload, priority=5, correlation_id=None):
+        published.append((event_type, payload, priority, correlation_id))
+
+    agent.publish = capture
+
+    await agent._evaluate_order_request(order_request(95_000))
+
+    assert len(published) == 1
+    event_type, payload, _, _ = published[0]
+    assert event_type == EventType.RISK_ASSESSMENT
+    assert payload["approved"] is True
+    assert payload["sizing"]["entry_price"] == 95_000
+    assert payload["sizing"]["position_size_usd"] > 1_000
+
+
+@pytest.mark.asyncio
+async def test_risk_agent_activates_kill_switch_when_hard_loss_threshold_is_breached():
+    params = RiskParameters(max_daily_loss_pct=0.001, max_drawdown_pct=0.15)
+    agent = RiskManagementAgent(params=params)
+    agent.portfolio.total_capital = 99_800.0
+    agent.portfolio.daily_loss_start = 100_000.0
+    published = []
+
+    async def capture(event_type, payload, priority=5, correlation_id=None):
+        published.append((event_type, payload, priority, correlation_id))
+
+    agent.publish = capture
+
+    await agent._evaluate_order_request(order_request(95_000))
+
+    event_types = [event_type for event_type, _, _, _ in published]
+    assert EventType.KILL_SWITCH_ACTIVATED in event_types
+    assert EventType.RISK_BREACH in event_types
+    assert agent._kill_switch_active is True

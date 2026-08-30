@@ -218,3 +218,51 @@ async def save_event(event_type: str, source: str, payload: dict) -> None:
             await db.commit()
     except Exception:
         pass  # Non-critical — don't let logging break trading
+
+
+async def get_event_history(event_type: Optional[str] = None, limit: int = 100) -> List[dict]:
+    """Load persisted audit events, newest first."""
+    limit = max(1, min(int(limit), 1000))
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            if event_type:
+                async with db.execute(
+                    """
+                    SELECT id, event_type, source, payload, timestamp
+                    FROM events
+                    WHERE event_type = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (event_type, limit),
+                ) as cur:
+                    rows = await cur.fetchall()
+            else:
+                async with db.execute(
+                    """
+                    SELECT id, event_type, source, payload, timestamp
+                    FROM events
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ) as cur:
+                    rows = await cur.fetchall()
+
+        events = []
+        for event_id, kind, source, payload, timestamp in rows:
+            try:
+                decoded_payload = json.loads(payload) if payload else {}
+            except json.JSONDecodeError:
+                decoded_payload = {"raw": payload}
+            events.append({
+                "id": event_id,
+                "event_type": kind,
+                "source": source,
+                "payload": decoded_payload,
+                "timestamp": timestamp,
+            })
+        return events
+    except Exception as e:
+        logger.error(f"Event history query failed: {e}")
+        return []

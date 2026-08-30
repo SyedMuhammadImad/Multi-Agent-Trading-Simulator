@@ -19,13 +19,15 @@ Security note: In production, add:
 """
 
 import asyncio
+import hmac
 import json
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import Depends, FastAPI, Header, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -41,7 +43,8 @@ except ImportError:
 from core.event_bus import EventType, get_event_bus
 from core.orchestrator import MasterOrchestrator
 from core.database import (init_db, save_trade, save_equity_snapshot,
-    save_agent_weights, load_agent_weights, get_trade_history, get_performance_stats)
+    save_agent_weights, load_agent_weights, get_trade_history, get_performance_stats,
+    save_event, get_event_history)
 from agents.strategy_agent import StrategyAgent
 from agents.risk_agent import RiskManagementAgent, RiskParameters
 from agents.execution_agent import ExecutionAgent, TradingMode
@@ -51,6 +54,9 @@ from agents.advanced_agents import ComplianceAgent, BacktestingAgent, LearningAg
 from data.pipeline import MarketDataPipeline
 
 logger = logging.getLogger(__name__)
+APP_ENV = os.getenv("APP_ENV", "development").lower()
+CONTROL_TOKEN = os.getenv("CONTROL_TOKEN", "")
+CONTROL_TOKEN_REQUIRED_ENVS = {"production", "prod", "staging"}
 
 # ─── System singleton ─────────────────────────────────────────────────────────
 class TradingSystem:
@@ -68,6 +74,20 @@ class TradingSystem:
     initialized: bool = False
 
 system = TradingSystem()
+
+
+def require_control_access(x_control_token: Optional[str] = Header(default=None)) -> None:
+    """
+    Keep dangerous control endpoints local/dev by default.
+
+    In production-like environments, set CONTROL_TOKEN and send it as
+    X-Control-Token. Development stays frictionless for the dashboard.
+    """
+    if APP_ENV not in CONTROL_TOKEN_REQUIRED_ENVS:
+        return
+    if CONTROL_TOKEN and hmac.compare_digest(x_control_token or "", CONTROL_TOKEN):
+        return
+    raise HTTPException(403, "Control endpoint access denied")
 
 
 @asynccontextmanager
@@ -120,6 +140,20 @@ async def lifespan(app: FastAPI):
     # Hook database persistence to event bus
     bus = get_event_bus()
 
+    async def _persist_event(event):
+        if event.event_type == EventType.AGENT_STATUS:
+            return
+        await save_event(
+            event.event_type.value,
+            event.source_agent,
+            {
+                **event.payload,
+                "event_id": event.event_id,
+                "priority": event.priority,
+                "correlation_id": event.correlation_id,
+            },
+        )
+
     async def _persist_closed_trade(event):
         try:
             trade = event.payload.get("trade", {})
@@ -136,6 +170,7 @@ async def lifespan(app: FastAPI):
             logger.error(f"DB persistence error: {e}")
 
     from core.event_bus import Event as _Event
+    bus.subscribe_all(_persist_event)
     bus.subscribe(EventType.POSITION_CLOSED, _persist_closed_trade)
 
     system.initialized = True
@@ -154,7 +189,7 @@ async def lifespan(app: FastAPI):
 
 # ─── FastAPI app ──────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="AI Hedge Fund Trading Platform",
+    title="AI Paper Trading Simulation",
     description="Multi-agent paper-trading simulation. Not production ready.",
     version="1.0.0",
     lifespan=lifespan,
@@ -351,7 +386,7 @@ class TestSignalRequest(BaseModel):
     confidence: float = 0.9
 
 
-@app.post("/api/controls/agent")
+@app.post("/api/controls/agent", dependencies=[Depends(require_control_access)])
 async def control_agent(request: AgentControlRequest):
     agent = _find_agent(request.agent_id)
     if not agent:
@@ -367,7 +402,7 @@ async def control_agent(request: AgentControlRequest):
         raise HTTPException(400, f"Unknown action: {request.action}")
 
 
-@app.post("/api/controls/kill-switch")
+@app.post("/api/controls/kill-switch", dependencies=[Depends(require_control_access)])
 async def activate_kill_switch(authorized_by: str = "manual"):
     """
     Emergency kill switch — closes all positions and stops trading.
@@ -385,7 +420,7 @@ async def activate_kill_switch(authorized_by: str = "manual"):
     return {"status": "kill_switch_activated", "authorized_by": authorized_by}
 
 
-@app.post("/api/controls/reset-kill-switch")
+@app.post("/api/controls/reset-kill-switch", dependencies=[Depends(require_control_access)])
 async def reset_kill_switch(authorized_by: str = "manual"):
     if system.orchestrator:
         system.orchestrator.deactivate_kill_switch(authorized_by)
@@ -394,7 +429,7 @@ async def reset_kill_switch(authorized_by: str = "manual"):
     return {"status": "kill_switch_reset", "authorized_by": authorized_by}
 
 
-@app.post("/api/controls/risk")
+@app.post("/api/controls/risk", dependencies=[Depends(require_control_access)])
 async def update_risk_parameters(request: RiskUpdateRequest):
     if not system.risk_agent:
         raise HTTPException(503, "System not initialized")
@@ -412,7 +447,7 @@ async def update_risk_parameters(request: RiskUpdateRequest):
     return {"status": "updated", "parameters": system.risk_agent.risk_parameters}
 
 
-@app.post("/api/controls/watchlist")
+@app.post("/api/controls/watchlist", dependencies=[Depends(require_control_access)])
 async def update_watchlist(request: SymbolWatchlistRequest):
     if not system.strategy_agent:
         raise HTTPException(503, "System not initialized")
@@ -429,7 +464,7 @@ async def update_watchlist(request: SymbolWatchlistRequest):
         raise HTTPException(400, "action must be 'add' or 'remove'")
 
 
-@app.post("/api/controls/inject-shock")
+@app.post("/api/controls/inject-shock", dependencies=[Depends(require_control_access)])
 async def inject_price_shock(symbol: str, shock_pct: float):
     """Stress test: inject a price shock for a symbol."""
     if not system.data_pipeline:
@@ -438,7 +473,7 @@ async def inject_price_shock(symbol: str, shock_pct: float):
     return {"status": "shock_injected", "symbol": symbol, "shock_pct": shock_pct}
 
 
-@app.post("/api/controls/inject-test-signals")
+@app.post("/api/controls/inject-test-signals", dependencies=[Depends(require_control_access)])
 async def inject_test_signals(request: TestSignalRequest):
     """Stress test: inject agreeing strategy and sentiment signals."""
     symbol = request.symbol.upper()
@@ -500,6 +535,14 @@ async def get_performance_stats_endpoint():
     return {"performance": stats, "sentiment_nlp": system.sentiment_agent.nlp_status if system.sentiment_agent else {}}
 
 
+@app.get("/api/events")
+async def get_audit_events(event_type: Optional[str] = None, limit: int = 100):
+    return {
+        "events": await get_event_history(event_type=event_type, limit=limit),
+        "limit": max(1, min(int(limit), 1000)),
+    }
+
+
 @app.post("/api/backtest")
 async def run_backtest(strategy: str = "trend_following", symbol: str = "AAPL", days: int = 252):
     if not system.backtest_agent:
@@ -538,7 +581,13 @@ async def _get_full_snapshot() -> dict:
     return {
         "portfolio": system.portfolio_manager.portfolio_summary if system.portfolio_manager else {},
         "agents": [a.health_check() for a in _get_all_agents()],
-        "risk": system.risk_agent.risk_parameters if system.risk_agent else {},
+        "risk": {
+            "portfolio": system.risk_agent.portfolio_state,
+            "parameters": system.risk_agent.risk_parameters,
+            "kill_switch_active": (
+                system.orchestrator.kill_switch_active if system.orchestrator else False
+            ),
+        } if system.risk_agent else {},
         "regime": system.regime_agent.current_regime if system.regime_agent else "UNKNOWN",
         "sentiment": system.sentiment_agent.current_sentiment if system.sentiment_agent else {},
         "recent_decisions": system.orchestrator.recent_decisions[:10] if system.orchestrator else [],

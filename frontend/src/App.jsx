@@ -34,12 +34,22 @@ function useWebSocket(url) {
 }
 
 // ─── API helper ───────────────────────────────────────────────────────────
-const API = "http://localhost:8000/api";
+const API = "/api";
 async function apiFetch(path, opts = {}) {
   try {
     const r = await fetch(API + path, opts);
     return await r.json();
   } catch { return null; }
+}
+
+function formatSignedCurrency(value) {
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${sign}$${Math.abs(value).toFixed(0)}`;
+}
+
+function formatSignedPercent(value) {
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${sign}${Math.abs(value).toFixed(2)}%`;
 }
 
 // ─── Sparkline ───────────────────────────────────────────────────────────
@@ -287,7 +297,7 @@ function RiskDashboard({ risk, regime }) {
 }
 
 // ─── Controls Panel ────────────────────────────────────────────────────────
-function ControlsPanel({ onKillSwitch, onResetKillSwitch }) {
+function ControlsPanel({ onKillSwitch, onResetKillSwitch, killActive }) {
   const [symbol, setSymbol] = useState("");
   const [shock, setShock] = useState(-10);
   const [showKillConfirm, setShowKillConfirm] = useState(false);
@@ -301,8 +311,10 @@ function ControlsPanel({ onKillSwitch, onResetKillSwitch }) {
           {!showKillConfirm ? (
             <button
               onClick={() => setShowKillConfirm(true)}
+              disabled={killActive}
               className="w-full py-2 px-4 bg-red-900/30 border border-red-500/40 text-red-400 
-                         rounded font-mono text-xs hover:bg-red-900/50 transition-all"
+                         rounded font-mono text-xs hover:bg-red-900/50 transition-all
+                         disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-900/30"
             >
               🔴 ACTIVATE KILL SWITCH
             </button>
@@ -356,8 +368,10 @@ function ControlsPanel({ onKillSwitch, onResetKillSwitch }) {
           </div>
           <button
             onClick={() => symbol && apiFetch(`/controls/inject-shock?symbol=${symbol}&shock_pct=${shock}`, { method: "POST" })}
+            disabled={killActive || !symbol}
             className="w-full py-2 bg-amber-900/30 border border-amber-500/30 text-amber-400
-                       rounded font-mono text-xs hover:bg-amber-900/50 transition-all"
+                       rounded font-mono text-xs hover:bg-amber-900/50 transition-all
+                       disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-amber-900/30"
           >
             Inject Price Shock
           </button>
@@ -405,7 +419,7 @@ function SentimentPanel({ sentiment }) {
 
 // ─── Main App ─────────────────────────────────────────────────────────────
 export default function App() {
-  const WS_URL = "ws://localhost:8000/ws";
+  const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
   const { events, snapshot, connected } = useWebSocket(WS_URL);
 
   const [portfolio, setPortfolio] = useState(null);
@@ -422,7 +436,10 @@ export default function App() {
     if (!snapshot) return;
     if (snapshot.portfolio) setPortfolio(snapshot.portfolio);
     if (snapshot.agents) setAgents(snapshot.agents);
-    if (snapshot.risk) setRisk({ parameters: snapshot.risk });
+    if (snapshot.risk) {
+      setRisk(snapshot.risk);
+      setKillActive(Boolean(snapshot.risk.kill_switch_active));
+    }
     if (snapshot.sentiment) setSentiment(snapshot.sentiment);
     if (snapshot.recent_decisions) setDecisions(snapshot.recent_decisions);
     if (snapshot.regime) setRegime(snapshot.regime);
@@ -446,6 +463,7 @@ export default function App() {
       if (rsk) {
         setRisk(rsk);
         setRegime(rsk.regime || "UNKNOWN");
+        setKillActive(Boolean(rsk.kill_switch_active));
       }
       if (sent?.current_sentiment) setSentiment(sent.current_sentiment);
       if (dec?.recent_decisions) setDecisions(dec.recent_decisions);
@@ -481,13 +499,14 @@ export default function App() {
     setKillActive(false);
   };
 
-  const totalValue = portfolio?.total_value || 100000;
-  const totalPnl = portfolio?.total_pnl || portfolio?.realized_pnl || 0;
+  const initialCapital = portfolio?.initial_capital || 100000;
+  const totalValue = portfolio?.total_value || initialCapital;
+  const totalPnl = totalValue - initialCapital;
   const unrealizedPnl = portfolio?.unrealized_pnl || 0;
   const drawdown = risk?.portfolio?.drawdown_pct || 0;
   const openPositions = portfolio?.open_positions || 0;
   const totalTrades = portfolio?.total_trades || 0;
-  const totalReturn = portfolio?.total_return_pct || 0;
+  const totalReturn = initialCapital > 0 ? (totalPnl / initialCapital) * 100 : 0;
 
   return (
     <div className="min-h-screen bg-[#080a0f] text-white font-sans" style={{
@@ -509,7 +528,7 @@ export default function App() {
             </div>
             <div>
               <div className="text-sm font-bold tracking-wider text-white">NEXUS<span className="text-cyan-400">AI</span></div>
-              <div className="text-[9px] text-zinc-600 tracking-widest uppercase">Multi-Agent Trading Platform</div>
+              <div className="text-[9px] text-zinc-600 tracking-widest uppercase">Paper Trading Simulation</div>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-1 text-[10px] font-mono text-zinc-600 border-l border-zinc-800 pl-4">
@@ -547,13 +566,13 @@ export default function App() {
           />
           <MetricCard
             label="Total P&L"
-            value={`${totalPnl >= 0 ? "+" : ""}$${Math.abs(totalPnl).toFixed(0)}`}
-            sub={`${totalReturn >= 0 ? "+" : ""}${totalReturn.toFixed(2)}%`}
+            value={formatSignedCurrency(totalPnl)}
+            sub={formatSignedPercent(totalReturn)}
             color={totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}
           />
           <MetricCard
             label="Unrealized"
-            value={`${unrealizedPnl >= 0 ? "+" : ""}$${Math.abs(unrealizedPnl).toFixed(0)}`}
+            value={formatSignedCurrency(unrealizedPnl)}
             color={unrealizedPnl >= 0 ? "text-emerald-400" : "text-red-400"}
           />
           <MetricCard
@@ -599,13 +618,17 @@ export default function App() {
             </div>
           </Panel>
 
-          <ControlsPanel onKillSwitch={handleKillSwitch} onResetKillSwitch={handleResetKillSwitch} />
+          <ControlsPanel
+            onKillSwitch={handleKillSwitch}
+            onResetKillSwitch={handleResetKillSwitch}
+            killActive={killActive}
+          />
         </div>
       </main>
 
       {/* Footer */}
       <footer className="border-t border-zinc-800/40 px-6 py-3 flex justify-between text-[10px] font-mono text-zinc-700">
-        <span>NEXUSAI v1.0.0 — Multi-Agent Hedge Fund Platform</span>
+        <span>NEXUSAI v1.0.0 — Paper Trading Simulation</span>
         <span>⚠ PAPER TRADING ONLY — Not financial advice</span>
       </footer>
     </div>

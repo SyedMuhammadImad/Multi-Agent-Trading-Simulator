@@ -259,8 +259,8 @@ All six original checklist items are **complete and verified**.
   (`total_pnl ≈ -$2,798` from real test trades, `worst_trade -$2,502`).
 
 ### What went well (and why)
-- The code was already production-ready for real news; a single env-var addition was all that
-  was needed. This is the intended upgrade path (`VADER → FinBERT / NewsAPI`).
+- The sentiment path can consume real NewsAPI headlines when configured, but it still needs
+  production hardening before live use. This is the intended upgrade path (`VADER -> FinBERT / NewsAPI`).
 - Real news is confirmed flowing (`real_news: true`, article count climbing) — the sentiment
   agent now reacts to genuine headlines.
 - The phantom-trade purge restored honest stats without harming live state (live portfolio

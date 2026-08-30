@@ -83,9 +83,9 @@ npm install && npm run dev
 
 ## Configuration (Environment Variables)
 
-The backend reads configuration from a `.env` file in `backend/` at startup. Create
-`backend/.env` with any of the following (the file is git-ignored and should never be
-committed):
+The backend reads configuration from a `.env` file in `backend/` at startup. Copy
+`backend/.env.example` to `backend/.env` and adjust values locally. The `.env` file is
+git-ignored and should never be committed.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -97,6 +97,8 @@ committed):
 | `LOG_LEVEL` | `INFO` | Python logging level |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | Server bind address |
 | `CORS_ORIGINS` | `*` | Allowed CORS origins |
+| `APP_ENV` | `development` | Set `production`, `prod`, or `staging` to require a control token |
+| `CONTROL_TOKEN` | _(unset)_ | Required as `X-Control-Token` for `/api/controls/*` in production-like environments |
 | `NEWS_API_KEY` | _(unset)_ | **NewsAPI.org key for real news sentiment** |
 
 **News sentiment (optional):**
@@ -128,7 +130,7 @@ stream = StockDataStream(API_KEY, SECRET_KEY)
 # Binance WebSocket (crypto)
 from binance import AsyncClient, BinanceSocketManager
 
-# Polygon.io (institutional grade)
+# Polygon.io (paid market-data provider)
 from polygon import WebSocketClient
 ```
 
@@ -201,6 +203,7 @@ GET  /api/orders          Order history + open orders
 GET  /api/risk            Risk parameters + exposure
 GET  /api/sentiment       NLP sentiment by symbol
 GET  /api/decisions       Orchestrator decision log
+GET  /api/events          Persisted event audit log
 
 POST /api/controls/agent          Pause/resume any agent
 POST /api/controls/kill-switch    Emergency stop (closes all)
@@ -208,7 +211,33 @@ POST /api/controls/reset-kill-switch  Re-enable trading
 POST /api/controls/risk           Hot-reload risk parameters
 POST /api/controls/watchlist      Add/remove symbols
 POST /api/controls/inject-shock   Stress test: inject price shock
+POST /api/controls/inject-test-signals  Dev-only paired signal injection
 ```
+
+Control endpoints are open only in local/development mode. For `APP_ENV=production`,
+`APP_ENV=prod`, or `APP_ENV=staging`, send `X-Control-Token: <CONTROL_TOKEN>`.
+
+---
+
+## Test Suite
+
+```bash
+cd backend
+python -m pytest
+```
+
+Current regression coverage checks:
+- flat `price` propagation into risk sizing, no silent `$100` fallback
+- invalid price rejection
+- hard loss threshold kill-switch activation
+- kill-switch blocking in the orchestrator
+- live-mode broker rejection without fake fills
+- stop-loss and kill-switch portfolio closure
+- production control-token enforcement
+- persisted audit event reads
+
+CI is defined in `.github/workflows/ci.yml` and runs backend install, compile, tests,
+frontend install, `npm audit`, and production build.
 
 ---
 
@@ -249,6 +278,7 @@ POST /api/controls/inject-shock   Stress test: inject price shock
 
 - Paper mode only by default; live broker execution is a stub.
 - Simulated market data only; no real exchange, broker, or data-feed connection is active.
-- No authentication, authorization, rate limiting, TLS, or production CORS policy.
+- No full authentication, user authorization, rate limiting, TLS, or production CORS policy.
+- Control endpoints require `CONTROL_TOKEN` in production-like environments, but this is not a replacement for full auth.
 - Risk controls are internal simulation guardrails and still require stress testing before any live use.
-- Technical indicators are simplified simulator outputs, not production-grade OHLCV calculations.
+- Technical indicators are simplified simulator outputs, not live-market OHLCV calculations.

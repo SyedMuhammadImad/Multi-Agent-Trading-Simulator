@@ -92,14 +92,15 @@ class ExnessMT5Config:
     def from_env(cls) -> "ExnessMT5Config":
         raw_login = os.getenv("EXNESS_DEMO_LOGIN", "").strip()
         login = int(raw_login) if raw_login.isdigit() else None
-        raw_symbols = os.getenv("EXNESS_SYMBOLS", "XAUUSDm,EURUSDm,BTCUSDm")
+        raw_symbols = os.getenv("EXNESS_SYMBOLS", "XAUUSDm,EURUSDm,BTCUSDm,USOILm")
         symbols = tuple(s.strip() for s in raw_symbols.split(",") if s.strip())
         raw_trade_symbols = os.getenv("EXNESS_TRADE_SYMBOLS", "EURUSDm")
         trade_symbols = tuple(s.strip() for s in raw_trade_symbols.split(",") if s.strip())
         raw_symbol_map = os.getenv(
             "EXNESS_SYMBOL_MAP",
             "BTC-USD:BTCUSDm,ETH-USD:ETHUSDm,EUR-USD:EURUSDm,GBP-USD:GBPUSDm,"
-            "XAUUSD:XAUUSDm,XAUUSDm:XAUUSDm,EURUSDm:EURUSDm,BTCUSDm:BTCUSDm",
+            "XAUUSD:XAUUSDm,USOIL:USOILm,WTI:USOILm,"
+            "XAUUSDm:XAUUSDm,EURUSDm:EURUSDm,BTCUSDm:BTCUSDm,USOILm:USOILm",
         )
         return cls(
             login=login,

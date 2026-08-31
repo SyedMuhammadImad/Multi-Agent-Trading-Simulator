@@ -29,8 +29,8 @@ Strategy   Risk Mgmt   Sentiment  Execution  Portfolio  Regime
  Agent      Agent       Agent      Agent     Manager   Detector
     │          │
     ▼          ▼
-Compliance  Backtesting  Learning  Compliance
-  Agent       Agent       Agent     Agent
+Broker Momentum  Backtesting  Learning  Compliance
+Confirmation      Agent       Agent     Agent
     │
     ▼
 Market Data Pipeline
@@ -48,6 +48,7 @@ Market Data Pipeline
 | **Risk Management** | Position sizing, stop-loss, kill switch | YES |
 | **Execution Agent** | Order lifecycle, slippage control | No |
 | **Sentiment Agent** | NLP news scoring, exponential decay | No |
+| **Broker Momentum Confirmation** | Independent broker-tick confirmation for Exness symbols | No |
 | **Portfolio Manager** | P&L tracking, performance metrics | No |
 | **Regime Detection** | Market classification (Bull/Bear/Crisis) | No |
 | **Compliance Agent** | PDT, wash sale, restricted lists | YES |
@@ -105,7 +106,7 @@ git-ignored and should never be committed.
 | `EXNESS_DEMO_PASSWORD` | _(unset)_ | Exness MT5 demo password; never commit this |
 | `EXNESS_DEMO_SERVER` | _(unset)_ | Exness MT5 demo server name |
 | `EXNESS_MT5_PATH` | _(unset)_ | Optional path to `terminal64.exe` |
-| `EXNESS_SYMBOLS` | `XAUUSDm,EURUSDm,BTCUSDm` | Symbols streamed from MT5 into the agents and dashboard |
+| `EXNESS_SYMBOLS` | `XAUUSDm,EURUSDm,BTCUSDm,USOILm` | Symbols streamed from MT5 into the agents and dashboard |
 | `EXNESS_TRADE_SYMBOLS` | `EURUSDm` | Broker symbols allowed to receive demo orders |
 | `EXNESS_ENABLE_DEMO_TRADING` | `false` | Must be `true` before MT5 demo orders are sent |
 | `EXNESS_ALLOW_MIN_VOLUME_ROUND_UP` | `false` | Demo-only option to round tiny risk-sized orders up to broker minimum lot |
@@ -161,6 +162,8 @@ In Exness demo mode the system:
 - connects MT5 on startup
 - syncs risk/portfolio capital from demo account equity
 - streams configured Exness quotes into the agents
+- lets the Sentiment Agent emit broker-symbol news signals for `EURUSDm`, `USOILm`, `XAUUSDm`, and `BTCUSDm`
+- adds a Broker Momentum Confirmation Agent for Exness trade-allowed symbols
 - sends approved risk-cleared orders through `order_check` and `order_send`
 - rejects non-demo accounts and symbols outside `EXNESS_TRADE_SYMBOLS`
 - rejects broker-minimum lot rounding if it exceeds the approved stop-loss risk

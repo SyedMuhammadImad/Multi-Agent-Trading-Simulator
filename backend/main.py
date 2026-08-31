@@ -49,6 +49,7 @@ from agents.strategy_agent import StrategyAgent
 from agents.risk_agent import RiskManagementAgent, RiskParameters
 from agents.execution_agent import ExecutionAgent, TradingMode
 from agents.sentiment_agent import SentimentAgent
+from agents.broker_confirmation_agent import BrokerMomentumConfirmationAgent
 from agents.portfolio_regime_agents import PortfolioManagerAgent, RegimeDetectionAgent
 from agents.advanced_agents import ComplianceAgent, BacktestingAgent, LearningAgent
 from brokers.exness_mt5 import ExnessMT5ReadOnlyBroker
@@ -68,6 +69,7 @@ class TradingSystem:
     risk_agent: Optional[RiskManagementAgent] = None
     execution_agent: Optional[ExecutionAgent] = None
     sentiment_agent: Optional[SentimentAgent] = None
+    broker_confirmation_agent: Optional[BrokerMomentumConfirmationAgent] = None
     portfolio_manager: Optional[PortfolioManagerAgent] = None
     regime_agent: Optional[RegimeDetectionAgent] = None
     compliance_agent: Optional[ComplianceAgent] = None
@@ -129,6 +131,7 @@ async def lifespan(app: FastAPI):
     system.risk_agent = RiskManagementAgent(initial_capital=100_000.0)
     system.execution_agent = ExecutionAgent(mode=_execution_mode_from_env())
     system.sentiment_agent = SentimentAgent()
+    system.broker_confirmation_agent = None
     system.portfolio_manager = PortfolioManagerAgent(initial_capital=100_000.0)
     system.regime_agent = RegimeDetectionAgent()
     system.data_pipeline = MarketDataPipeline()
@@ -136,6 +139,11 @@ async def lifespan(app: FastAPI):
     system.backtest_agent = BacktestingAgent()
     system.learning_agent = LearningAgent(orchestrator=system.orchestrator)
     system.exness_broker = ExnessMT5ReadOnlyBroker()
+    if _exness_demo_mode_requested():
+        confirmation_symbols = list(system.exness_broker.config.symbols)
+        system.broker_confirmation_agent = BrokerMomentumConfirmationAgent(
+            symbols=confirmation_symbols
+        )
     if system.execution_agent.mode == TradingMode.LIVE:
         system.execution_agent.set_live_broker(system.exness_broker)
 
@@ -156,9 +164,11 @@ async def lifespan(app: FastAPI):
         system.risk_agent,
         system.execution_agent,
         system.sentiment_agent,
+        system.broker_confirmation_agent,
         system.portfolio_manager,
         system.regime_agent,
     ]
+    agents = [agent for agent in agents if agent is not None]
     
     for agent in agents:
         await agent.start()
@@ -635,6 +645,7 @@ def _get_all_agents():
             system.risk_agent,
             system.execution_agent,
             system.sentiment_agent,
+            system.broker_confirmation_agent,
             system.portfolio_manager,
             system.regime_agent,
         ] if a is not None

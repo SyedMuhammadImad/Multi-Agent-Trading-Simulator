@@ -87,6 +87,32 @@ NEWS_TEMPLATES = {
         "Ethereum ETF approval probability increases say analysts",
         "Ethereum layer 2 adoption accelerates reducing mainnet congestion",
     ],
+    "BTCUSDm": [
+        "Bitcoin ETF inflows support bullish crypto sentiment",
+        "Crypto market falls as risk appetite weakens",
+        "Bitcoin rebounds as institutional demand improves",
+        "Digital asset selloff weighs on Bitcoin momentum",
+    ],
+    "EURUSDm": [
+        "Euro strengthens as dollar softens after economic data",
+        "EUR/USD slips as traders price stronger dollar outlook",
+        "European growth data lifts euro sentiment",
+        "Dollar rally pressures EUR/USD lower",
+        "ECB policy comments support euro against dollar",
+    ],
+    "XAUUSDm": [
+        "Gold rises as safe haven demand increases",
+        "Gold prices fall as dollar and yields climb",
+        "Central bank buying supports gold market sentiment",
+        "Risk-on mood weighs on gold demand",
+    ],
+    "USOILm": [
+        "US crude oil rallies as inventories tighten",
+        "Oil prices fall as demand concerns grow",
+        "WTI crude rebounds on supply disruption fears",
+        "Energy markets weaken after bearish inventory report",
+        "US oil gains as OPEC supply cuts support prices",
+    ],
     "SPY": [
         "S&P 500 hits fresh record high on stronger than expected jobs data",
         "Markets fall sharply as Fed signals fewer rate cuts ahead",
@@ -95,6 +121,19 @@ NEWS_TEMPLATES = {
         "Earnings season broadly beats expectations lifting broad market",
         "Inflation data surprise triggers broad market selloff",
     ],
+}
+
+NEWS_SEARCH_TERMS = {
+    "AAPL": "Apple stock",
+    "MSFT": "Microsoft stock",
+    "TSLA": "Tesla stock",
+    "BTC-USD": "Bitcoin",
+    "ETH-USD": "Ethereum",
+    "SPY": "S&P 500",
+    "BTCUSDm": "Bitcoin crypto market",
+    "EURUSDm": "EUR USD forex euro dollar",
+    "XAUUSDm": "gold XAU USD",
+    "USOILm": "WTI crude oil US oil",
 }
 
 try:
@@ -158,6 +197,7 @@ class SentimentAgent(BaseAgent):
         super().__init__("sentiment_agent", "Sentiment Agent")
         self._windows: Dict[str, List[Tuple[float, float, float]]] = {}
         self._aggregated: Dict[str, AggregatedSentiment] = {}
+        self._last_emitted: Dict[str, AggregatedSentiment] = {}
         self._recent_news: List[dict] = []
         self._tracked_symbols = ["AAPL", "MSFT", "TSLA", "BTC-USD", "ETH-USD", "SPY"]
         self._decay_half_life = 3600.0
@@ -203,15 +243,10 @@ class SentimentAgent(BaseAgent):
     async def _fetch_newsapi(self) -> None:
         try:
             import httpx
-            search_map = {
-                "AAPL": "Apple stock", "MSFT": "Microsoft stock",
-                "TSLA": "Tesla stock", "BTC-USD": "Bitcoin",
-                "ETH-USD": "Ethereum", "SPY": "S&P 500",
-            }
             for symbol in self._tracked_symbols:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     r = await client.get("https://newsapi.org/v2/everything", params={
-                        "q": search_map.get(symbol, symbol),
+                        "q": NEWS_SEARCH_TERMS.get(symbol, symbol),
                         "language": "en", "sortBy": "publishedAt",
                         "pageSize": 5, "apiKey": self._newsapi_key,
                     })
@@ -270,13 +305,13 @@ class SentimentAgent(BaseAgent):
             return
         final = ws / tw
         conf = min(0.92, tc / len(window))
-        prev = self._aggregated.get(symbol)
         self._aggregated[symbol] = AggregatedSentiment(
             symbol=symbol, score=final, confidence=conf,
             item_count=len(window), positive_count=pos,
             negative_count=neg, neutral_count=neu, last_updated=now,
         )
         agg = self._aggregated[symbol]
+        prev = self._last_emitted.get(symbol)
         if (len(window) >= self._min_items and conf >= self._min_confidence and
                 abs(final) >= self._signal_threshold and
                 (prev is None or prev.direction != agg.direction or abs(final - prev.score) > 0.08)):
@@ -285,6 +320,7 @@ class SentimentAgent(BaseAgent):
     async def _emit(self, symbol: str, agg: AggregatedSentiment) -> None:
         if agg.direction == "HOLD":
             return
+        self._last_emitted[symbol] = agg
         self.metrics.signals_generated += 1
         await self.publish(EventType.SENTIMENT_SIGNAL, {
             "symbol": symbol, "direction": agg.direction,

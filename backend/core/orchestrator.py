@@ -137,15 +137,25 @@ class MasterOrchestrator(BaseAgent):
     and dispatches orders. Cannot be paused — only killed.
     """
 
-    def __init__(self, agent_weights: Optional[Dict[str, float]] = None):
+    def __init__(
+        self,
+        agent_weights: Optional[Dict[str, float]] = None,
+        min_final_confidence: float = 0.60,
+        min_strategy_confidence: float = 0.55,
+        min_confirmation_confidence: float = 0.52,
+        cooldown_seconds: float = 120.0,
+    ):
         super().__init__("master_orchestrator", "Master Orchestrator")
         self._agent_weights = agent_weights or DEFAULT_AGENT_WEIGHTS
+        self._min_final_confidence = min_final_confidence
+        self._min_strategy_confidence = min_strategy_confidence
+        self._min_confirmation_confidence = min_confirmation_confidence
         self._pending_signals: Dict[str, List[AgentSignal]] = {}  # symbol -> signals
         self._decisions: List[OrchestratorDecision] = []
         self._kill_switch_active = False
         self._paused_symbols: set = set()
         self._decision_cooldown: Dict[str, float] = {}  # symbol -> last decision time
-        self._cooldown_seconds = 30.0  # Min seconds between decisions on same symbol
+        self._cooldown_seconds = cooldown_seconds  # Min seconds between decisions on same symbol
 
     async def initialize(self) -> None:
         """Subscribe to all signal and risk events."""
@@ -303,8 +313,18 @@ class MasterOrchestrator(BaseAgent):
         )
         gate_passed, gate_reasons = self._strict_trade_gate(signals, target_direction)
 
+        confidence_blocked = (
+            target_direction in {"BUY", "SELL"}
+            and final_confidence < self._min_final_confidence
+        )
+
         if consensus_pct < MIN_CONSENSUS_PCT:
             reasons.append(f"No consensus ({consensus_pct:.0%} < {MIN_CONSENSUS_PCT:.0%}) → HOLD")
+        elif confidence_blocked:
+            reasons.append(
+                f"Confidence gate: {final_confidence:.0%} < "
+                f"{self._min_final_confidence:.0%} minimum → HOLD"
+            )
         elif target_direction in {"BUY", "SELL"} and not gate_passed:
             reasons.extend(gate_reasons)
         elif composite_score >= BUY_THRESHOLD:
@@ -323,7 +343,11 @@ class MasterOrchestrator(BaseAgent):
             final_confidence=final_confidence,
             reasoning=reasons,
             signal_details=[signal.to_dict() for signal in signals],
-            blocked_by="strict_agent_gate" if gate_reasons else None,
+            blocked_by=(
+                "confidence_gate" if confidence_blocked
+                else "strict_agent_gate" if gate_reasons
+                else None
+            ),
         )
 
     def _strict_trade_gate(
@@ -340,15 +364,25 @@ class MasterOrchestrator(BaseAgent):
             reasons.append(
                 f"Strict gate: Strategy Agent is {strategy.direction.value}, not {target_direction} → HOLD"
             )
+        elif strategy.confidence < self._min_strategy_confidence:
+            reasons.append(
+                f"Strict gate: Strategy Agent confidence {strategy.confidence:.0%} "
+                f"< {self._min_strategy_confidence:.0%} → HOLD"
+            )
 
         confirmation_agents = {"sentiment_agent", "broker_confirmation_agent", "macro_agent"}
         confirmations = [
             s for s in signals
-            if s.agent_id in confirmation_agents and s.direction.value == target_direction
+            if (
+                s.agent_id in confirmation_agents
+                and s.direction.value == target_direction
+                and s.confidence >= self._min_confirmation_confidence
+            )
         ]
         if not confirmations:
             reasons.append(
-                f"Strict gate: no independent confirmation agrees with {target_direction} → HOLD"
+                f"Strict gate: no independent confirmation agrees with {target_direction} "
+                f"at >= {self._min_confirmation_confidence:.0%} confidence → HOLD"
             )
 
         blockers = [

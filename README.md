@@ -100,6 +100,10 @@ git-ignored and should never be committed.
 | `CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins |
 | `APP_ENV` | `development` | Set `production`, `prod`, or `staging` to require a control token |
 | `CONTROL_TOKEN` | _(unset)_ | Required as `X-Control-Token` for `/api/controls/*` in production-like environments |
+| `ORCHESTRATOR_MIN_FINAL_CONFIDENCE` | `0.60` | Minimum normalized confidence before a BUY/SELL can be dispatched |
+| `ORCHESTRATOR_MIN_STRATEGY_CONFIDENCE` | `0.55` | Minimum Strategy Agent confidence required by the strict gate |
+| `ORCHESTRATOR_MIN_CONFIRMATION_CONFIDENCE` | `0.52` | Minimum independent confirmation confidence required by the strict gate |
+| `ORCHESTRATOR_COOLDOWN_SECONDS` | `120.0` | Minimum seconds between trade decisions for the same symbol |
 | `NEWS_API_KEY` | _(unset)_ | **NewsAPI.org key for real news sentiment** |
 | `BROKER` | _(unset)_ | Set `exness_mt5` to use the Exness MT5 demo adapter |
 | `EXNESS_DEMO_LOGIN` | _(unset)_ | Exness MT5 demo account number |
@@ -165,6 +169,7 @@ In Exness demo mode the system:
 - connects MT5 on startup
 - syncs risk/portfolio capital from demo account equity
 - streams configured Exness quotes into the agents and does not run simulated market-data trading at the same time
+- attaches MT5 M1 OHLCV candles when available, so broker-symbol indicators use recent candle history instead of random or flat fallbacks
 - reconciles local portfolio, risk exposure, and execution state from MT5 account/open-position snapshots
 - lets the Sentiment Agent emit broker-symbol news signals for `EURUSDm`, `USOILm`, `XAUUSDm`, and `BTCUSDm`
 - adds a Broker Momentum Confirmation Agent for configured Exness feed symbols
@@ -293,7 +298,10 @@ Current regression coverage checks:
 - flat `price` propagation into risk sizing, no silent `$100` fallback
 - invalid price rejection
 - broker-tick indicator warmup and observed-history calculations without random strategy inputs
+- MT5 M1 OHLCV payload ingestion for broker-symbol indicators
 - strict strategy-plus-confirmation orchestration before a trade can reach risk
+- confidence-gate rejection for weak strategy/confirmation agreement
+- JSON-safe portfolio metrics when profit factor is undefined
 - hard loss threshold kill-switch activation
 - kill-switch blocking in the orchestrator
 - live-mode broker rejection without fake fills and broker fill event publishing
@@ -348,6 +356,6 @@ frontend install, `npm audit`, and production build.
 - No full authentication, user authorization, rate limiting, TLS, or production CORS policy.
 - Control endpoints require `CONTROL_TOKEN` in production-like environments, but this is not a replacement for full auth.
 - Risk controls are internal simulation guardrails and still require stress testing before any live use.
-- Broker-symbol indicators are derived from observed MT5 ticks and are still not full OHLCV candle calculations.
+- Broker-symbol indicators use MT5 M1 OHLCV candles when available, with observed tick history as a fallback.
 - Exness integration requires a local Windows MT5 terminal and demo credentials in `backend/.env`.
 - Broker minimum lots can exceed the simulator's desired risk size on very small demo balances.

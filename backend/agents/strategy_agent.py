@@ -78,6 +78,16 @@ class TechnicalIndicators:
         return self.volume / max(self.avg_volume, 1)
 
 
+@dataclass
+class OhlcvCandle:
+    timestamp: float
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
 class StrategyAgent(BaseAgent):
     """
     Multi-strategy signal generator.
@@ -149,7 +159,10 @@ class StrategyAgent(BaseAgent):
             if len(history) > 240:
                 del history[:-240]
 
-            if self._payload_has_indicators(payload):
+            ohlcv = payload.get("ohlcv") or payload.get("candles")
+            if ohlcv:
+                indicators = self._indicators_from_ohlcv(symbol, payload, ohlcv)
+            elif self._payload_has_indicators(payload):
                 indicators = self._indicators_from_payload(symbol, payload, price)
             else:
                 indicators = self._indicators_from_history(symbol, payload, history)
@@ -190,6 +203,83 @@ class StrategyAgent(BaseAgent):
             spread_bps=payload.get("spread_bps"),
         )
 
+    def _indicators_from_ohlcv(
+        self, symbol: str, payload: dict, raw_candles: List[dict]
+    ) -> Optional[TechnicalIndicators]:
+        candles = self._normalize_ohlcv(raw_candles)
+        if len(candles) < 50:
+            return None
+
+        candles = candles[-240:]
+        closes = [c.close for c in candles]
+        highs = [c.high for c in candles]
+        lows = [c.low for c in candles]
+        volumes = [c.volume for c in candles]
+
+        price = float(payload.get("price") or closes[-1])
+        sma_20 = self._sma(closes, 20)
+        sma_50 = self._sma(closes, 50)
+        sma_200 = self._sma(closes, min(200, len(closes)))
+        rsi = self._rsi(closes, 14)
+        macd_line, macd_signal = self._macd(closes)
+
+        closes_20 = closes[-20:]
+        std_20 = float(np.std(closes_20))
+        bb_mid = sma_20
+        bb_upper = bb_mid + 2 * std_20
+        bb_lower = bb_mid - 2 * std_20
+        atr = self._atr_from_ohlcv(highs, lows, closes, 14)
+        volume = volumes[-1]
+        avg_volume = sum(volumes[-20:]) / max(len(volumes[-20:]), 1)
+
+        return TechnicalIndicators(
+            symbol=symbol,
+            price=price,
+            sma_20=sma_20,
+            sma_50=sma_50,
+            sma_200=sma_200,
+            rsi_14=rsi,
+            macd_line=macd_line,
+            macd_signal=macd_signal,
+            bb_upper=bb_upper,
+            bb_lower=bb_lower,
+            bb_mid=bb_mid,
+            volume=volume,
+            avg_volume=avg_volume,
+            atr_14=atr,
+            spread_bps=payload.get("spread_bps"),
+        )
+
+    def _normalize_ohlcv(self, raw_candles: List[dict]) -> List[OhlcvCandle]:
+        candles = []
+        for raw in raw_candles:
+            try:
+                open_price = float(raw.get("open") or 0)
+                high = float(raw.get("high") or 0)
+                low = float(raw.get("low") or 0)
+                close = float(raw.get("close") or 0)
+                if min(open_price, high, low, close) <= 0:
+                    continue
+                volume = float(
+                    raw.get("volume")
+                    or raw.get("tick_volume")
+                    or raw.get("real_volume")
+                    or 0
+                )
+                candles.append(
+                    OhlcvCandle(
+                        timestamp=float(raw.get("time") or raw.get("timestamp") or 0),
+                        open=open_price,
+                        high=high,
+                        low=low,
+                        close=close,
+                        volume=volume,
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+        return candles
+
     def _indicators_from_history(
         self, symbol: str, payload: dict, history: List[float]
     ) -> Optional[TechnicalIndicators]:
@@ -201,16 +291,7 @@ class StrategyAgent(BaseAgent):
         sma_50 = self._sma(history, 50)
         sma_200 = self._sma(history, min(200, len(history)))
         rsi = self._rsi(history, 14)
-        ema_12 = self._ema(history, 12)
-        ema_26 = self._ema(history, 26)
-        macd_line = ema_12 - ema_26
-        macd_signal = macd_line
-        if len(history) >= 35:
-            macd_series = []
-            for idx in range(26, len(history) + 1):
-                window = history[:idx]
-                macd_series.append(self._ema(window, 12) - self._ema(window, 26))
-            macd_signal = self._ema(macd_series, min(9, len(macd_series)))
+        macd_line, macd_signal = self._macd(history)
 
         prices_20 = history[-20:]
         std_20 = float(np.std(prices_20))
@@ -252,6 +333,18 @@ class StrategyAgent(BaseAgent):
             ema = value * alpha + ema * (1 - alpha)
         return ema
 
+    def _macd(self, values: List[float]) -> Tuple[float, float]:
+        ema_12 = self._ema(values, 12)
+        ema_26 = self._ema(values, 26)
+        macd_line = ema_12 - ema_26
+        if len(values) < 35:
+            return macd_line, macd_line
+        macd_series = []
+        for idx in range(26, len(values) + 1):
+            window = values[:idx]
+            macd_series.append(self._ema(window, 12) - self._ema(window, 26))
+        return macd_line, self._ema(macd_series, min(9, len(macd_series)))
+
     def _rsi(self, values: List[float], period: int = 14) -> float:
         if len(values) < period + 1:
             return 50.0
@@ -275,6 +368,24 @@ class StrategyAgent(BaseAgent):
         ranges = [abs(recent[i] - recent[i - 1]) for i in range(1, len(recent))]
         atr = sum(ranges) / len(ranges)
         return max(atr, values[-1] * 0.00005)
+
+    def _atr_from_ohlcv(
+        self, highs: List[float], lows: List[float], closes: List[float], period: int = 14
+    ) -> float:
+        if len(closes) < 2:
+            return max(closes[-1] * 0.001, 0.00001)
+        start = max(1, len(closes) - period)
+        true_ranges = []
+        for idx in range(start, len(closes)):
+            true_ranges.append(
+                max(
+                    highs[idx] - lows[idx],
+                    abs(highs[idx] - closes[idx - 1]),
+                    abs(lows[idx] - closes[idx - 1]),
+                )
+            )
+        atr = sum(true_ranges) / max(len(true_ranges), 1)
+        return max(atr, closes[-1] * 0.00005)
 
     def _run_strategy(
         self, strategy: StrategyType, ind: TechnicalIndicators

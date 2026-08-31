@@ -275,7 +275,9 @@ class PortfolioManagerAgent(BaseAgent):
         win_rate = len(winning) / len(pnls)
         avg_win = sum(winning) / len(winning) if winning else 0
         avg_loss = abs(sum(losing) / len(losing)) if losing else 0
-        profit_factor = sum(winning) / abs(sum(losing)) if losing else float("inf")
+        gross_profit = sum(winning)
+        gross_loss = abs(sum(losing))
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else None
 
         # Sharpe ratio (annualized, assuming 252 trading days)
         if len(self._daily_returns) > 1:
@@ -305,7 +307,7 @@ class PortfolioManagerAgent(BaseAgent):
             "win_rate": round(win_rate * 100, 1),
             "avg_win_usd": round(avg_win, 2),
             "avg_loss_usd": round(avg_loss, 2),
-            "profit_factor": round(profit_factor, 2),
+            "profit_factor": round(profit_factor, 2) if profit_factor is not None else None,
             "sharpe_ratio": round(sharpe, 3),
             "max_drawdown_pct": round(max_dd * 100, 2),
             "total_pnl": round(sum(pnls), 2),

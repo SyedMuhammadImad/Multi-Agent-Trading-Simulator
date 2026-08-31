@@ -11,7 +11,7 @@ import math
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 SUCCESSFUL_CHECK_RETCODES = {0, 10008, 10009, 10010}
@@ -69,6 +69,12 @@ def _to_dict(value: Any) -> Dict[str, Any]:
         for key in dir(value)
         if not key.startswith("_") and not callable(getattr(value, key))
     }
+
+
+def _json_number(value: Any) -> float:
+    if hasattr(value, "item"):
+        value = value.item()
+    return float(value)
 
 
 @dataclass(frozen=True)
@@ -369,6 +375,7 @@ class ExnessMT5DemoBroker:
 
         price = (bid + ask) / 2
         spread_bps = (ask - bid) / price * 10_000 if price > 0 else 0
+        ohlcv = self._ohlcv_rates(quote["symbol"], count=240)
         return {
             "status": self.status(),
             "payload": {
@@ -380,9 +387,46 @@ class ExnessMT5DemoBroker:
                 "volume": 0.0,
                 "timestamp": time.time(),
                 "spread_bps": round(spread_bps, 2),
+                "ohlcv": ohlcv,
+                "ohlcv_timeframe": "M1" if ohlcv else None,
                 "vix": 20.0,
             },
         }
+
+    def _ohlcv_rates(self, symbol: str, count: int = 240) -> List[dict]:
+        copy_rates = getattr(self._mt5, "copy_rates_from_pos", None)
+        if copy_rates is None:
+            return []
+        timeframe = getattr(self._mt5, "TIMEFRAME_M1", 1)
+        try:
+            rates = copy_rates(symbol, timeframe, 0, count)
+        except Exception as exc:
+            self._last_error = f"MT5 copy_rates_from_pos failed for {symbol}: {exc}"
+            return []
+        if rates is None:
+            return []
+
+        candles = []
+        for rate in rates:
+            try:
+                if isinstance(rate, dict):
+                    raw = rate
+                elif getattr(rate, "dtype", None) is not None and rate.dtype.names:
+                    raw = {name: rate[name] for name in rate.dtype.names}
+                else:
+                    raw = _to_dict(rate)
+                candles.append({
+                    "time": _json_number(raw.get("time", 0)),
+                    "open": _json_number(raw.get("open", 0)),
+                    "high": _json_number(raw.get("high", 0)),
+                    "low": _json_number(raw.get("low", 0)),
+                    "close": _json_number(raw.get("close", 0)),
+                    "tick_volume": _json_number(raw.get("tick_volume", 0)),
+                    "real_volume": _json_number(raw.get("real_volume", 0)),
+                })
+            except (TypeError, ValueError):
+                continue
+        return candles
 
     def submit_market_order(self, order: Any) -> Dict[str, Any]:
         status = self.connect() if not self._connected else self.status()

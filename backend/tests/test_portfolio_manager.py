@@ -1,4 +1,5 @@
 import pytest
+from starlette.responses import JSONResponse
 
 from agents.portfolio_regime_agents import PortfolioManagerAgent
 from core.event_bus import Event, EventType
@@ -69,3 +70,13 @@ async def test_portfolio_closes_all_positions_on_kill_switch():
     assert agent.portfolio_summary["open_positions"] == 0
     assert closed[0]["reason"] == "daily loss"
     assert closed[0]["pnl"] == -20.0
+
+
+def test_performance_metrics_are_json_safe_when_there_are_no_losses():
+    agent = PortfolioManagerAgent()
+    agent._closed_trades = [{"pnl": 5.0}, {"pnl": 3.0}]
+
+    metrics = agent.performance_metrics
+
+    assert metrics["profit_factor"] is None
+    JSONResponse({"metrics": metrics})

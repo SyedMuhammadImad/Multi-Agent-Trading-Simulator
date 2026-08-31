@@ -62,6 +62,10 @@ CONTROL_TOKEN_REQUIRED_ENVS = {"production", "prod", "staging"}
 TRADING_MODE_ENV = os.getenv("TRADING_MODE", "paper").strip().lower()
 EXNESS_MARKET_DATA_INTERVAL = float(os.getenv("EXNESS_MARKET_DATA_INTERVAL", "2.0"))
 EXNESS_RECONCILE_INTERVAL = float(os.getenv("EXNESS_RECONCILE_INTERVAL", "5.0"))
+ORCHESTRATOR_MIN_FINAL_CONFIDENCE = float(os.getenv("ORCHESTRATOR_MIN_FINAL_CONFIDENCE", "0.60"))
+ORCHESTRATOR_MIN_STRATEGY_CONFIDENCE = float(os.getenv("ORCHESTRATOR_MIN_STRATEGY_CONFIDENCE", "0.55"))
+ORCHESTRATOR_MIN_CONFIRMATION_CONFIDENCE = float(os.getenv("ORCHESTRATOR_MIN_CONFIRMATION_CONFIDENCE", "0.52"))
+ORCHESTRATOR_COOLDOWN_SECONDS = float(os.getenv("ORCHESTRATOR_COOLDOWN_SECONDS", "120.0"))
 CORS_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
@@ -134,7 +138,12 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing trading system...")
     
     # Initialize all agents
-    system.orchestrator = MasterOrchestrator()
+    system.orchestrator = MasterOrchestrator(
+        min_final_confidence=ORCHESTRATOR_MIN_FINAL_CONFIDENCE,
+        min_strategy_confidence=ORCHESTRATOR_MIN_STRATEGY_CONFIDENCE,
+        min_confirmation_confidence=ORCHESTRATOR_MIN_CONFIRMATION_CONFIDENCE,
+        cooldown_seconds=ORCHESTRATOR_COOLDOWN_SECONDS,
+    )
     system.strategy_agent = StrategyAgent()
     system.risk_agent = RiskManagementAgent(initial_capital=100_000.0)
     system.execution_agent = ExecutionAgent(mode=_execution_mode_from_env())

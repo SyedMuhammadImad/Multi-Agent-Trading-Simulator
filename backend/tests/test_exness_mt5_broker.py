@@ -128,6 +128,58 @@ def test_exness_quote_reads_bid_ask_from_mt5():
     }
 
 
+def test_exness_market_data_payload_includes_m1_ohlcv_when_available():
+    Tick = namedtuple("Tick", "bid ask last time time_msc")
+    Rate = namedtuple("Rate", "time open high low close tick_volume real_volume")
+
+    class FakeMT5:
+        TIMEFRAME_M1 = 1
+
+        def initialize(self, **kwargs):
+            return True
+
+        def account_info(self):
+            return {"login": 12345678}
+
+        def symbol_select(self, symbol, enabled):
+            return True
+
+        def symbol_info_tick(self, symbol):
+            return Tick(bid=1.15989, ask=1.15997, last=0.0, time=1, time_msc=1000)
+
+        def copy_rates_from_pos(self, symbol, timeframe, start_pos, count):
+            return [
+                Rate(
+                    time=i,
+                    open=1.1 + i * 0.0001,
+                    high=1.1002 + i * 0.0001,
+                    low=1.0998 + i * 0.0001,
+                    close=1.1001 + i * 0.0001,
+                    tick_volume=100 + i,
+                    real_volume=0,
+                )
+                for i in range(60)
+            ]
+
+        def last_error(self):
+            return (0, "OK")
+
+    config = ExnessMT5Config(
+        login=12345678,
+        password="secret-password",
+        server="Exness-MT5Trial",
+        terminal_path="",
+        symbols=("EURUSDm",),
+    )
+    broker = ExnessMT5ReadOnlyBroker(config=config, mt5_module=FakeMT5())
+
+    result = broker.market_data_payload("EURUSDm")
+
+    assert result["payload"]["ohlcv_timeframe"] == "M1"
+    assert len(result["payload"]["ohlcv"]) == 60
+    assert result["payload"]["ohlcv"][-1]["tick_volume"] == 159.0
+
+
 def test_exness_positions_returns_public_broker_snapshot():
     Position = namedtuple(
         "Position",

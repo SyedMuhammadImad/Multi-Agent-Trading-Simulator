@@ -3,15 +3,16 @@ version: "3.9"
 services:
   backend:
     build:
-      context: ./backend
+      context: .
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
       - TRADING_MODE=paper
       - LOG_LEVEL=info
+      - CORS_ORIGINS=http://localhost:3000
     volumes:
-      - ./backend:/app
+      - .:/app
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
@@ -21,7 +22,7 @@ services:
 
   frontend:
     build:
-      context: ./frontend
+      context: ../frontend
       dockerfile: Dockerfile
     ports:
       - "3000:3000"

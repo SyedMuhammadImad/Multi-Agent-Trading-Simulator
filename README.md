@@ -97,7 +97,7 @@ git-ignored and should never be committed.
 | `MAX_DRAWDOWN_PCT` | `0.15` | Kill-switch trigger (15%) |
 | `LOG_LEVEL` | `INFO` | Python logging level |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | Server bind address |
-| `CORS_ORIGINS` | `*` | Allowed CORS origins |
+| `CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins |
 | `APP_ENV` | `development` | Set `production`, `prod`, or `staging` to require a control token |
 | `CONTROL_TOKEN` | _(unset)_ | Required as `X-Control-Token` for `/api/controls/*` in production-like environments |
 | `NEWS_API_KEY` | _(unset)_ | **NewsAPI.org key for real news sentiment** |
@@ -112,6 +112,8 @@ git-ignored and should never be committed.
 | `EXNESS_ALLOW_MIN_VOLUME_ROUND_UP` | `false` | Demo-only option to round tiny risk-sized orders up to broker minimum lot |
 | `EXNESS_MAX_ORDER_VOLUME` | `0.01` | Hard cap on MT5 lot size per demo order |
 | `EXNESS_MAX_ORDER_RISK_USD` | `2.0` | Hard cap on estimated stop-loss risk after broker lot rounding |
+| `EXNESS_MARKET_DATA_INTERVAL` | `2.0` | MT5 quote polling interval in seconds |
+| `EXNESS_RECONCILE_INTERVAL` | `5.0` | MT5 account/position reconciliation interval in seconds |
 
 **News sentiment (optional):**
 By default the Sentiment Agent uses **simulated** news headlines. To have it react to
@@ -144,6 +146,7 @@ Then set the Exness demo variables in `backend/.env` and restart the backend. Ch
 GET  /api/broker/exness
 POST /api/broker/exness/connect
 GET  /api/broker/exness/account
+GET  /api/broker/exness/positions
 GET  /api/broker/exness/quote/XAUUSDm
 ```
 
@@ -161,10 +164,12 @@ EXNESS_ALLOW_MIN_VOLUME_ROUND_UP=true
 In Exness demo mode the system:
 - connects MT5 on startup
 - syncs risk/portfolio capital from demo account equity
-- streams configured Exness quotes into the agents
+- streams configured Exness quotes into the agents and does not run simulated market-data trading at the same time
+- reconciles local portfolio, risk exposure, and execution state from MT5 account/open-position snapshots
 - lets the Sentiment Agent emit broker-symbol news signals for `EURUSDm`, `USOILm`, `XAUUSDm`, and `BTCUSDm`
 - adds a Broker Momentum Confirmation Agent for configured Exness feed symbols
 - sends approved risk-cleared orders through `order_check` and `order_send`
+- records broker/risk rejections in `/api/orders` so blocked trades are visible
 - rejects non-demo accounts and symbols outside `EXNESS_TRADE_SYMBOLS`
 - rejects broker-minimum lot rounding if it exceeds the approved stop-loss risk
 
@@ -258,6 +263,7 @@ GET  /api/decisions       Orchestrator decision log
 GET  /api/events          Persisted event audit log
 GET  /api/broker/exness   Exness MT5 demo connection/status
 GET  /api/broker/exness/account  Sanitized Exness demo account snapshot
+GET  /api/broker/exness/positions  Sanitized Exness demo open positions
 GET  /api/broker/exness/quote/{symbol}  Exness MT5 bid/ask quote
 
 POST /api/controls/agent          Pause/resume any agent
@@ -286,13 +292,16 @@ python -m pytest
 Current regression coverage checks:
 - flat `price` propagation into risk sizing, no silent `$100` fallback
 - invalid price rejection
+- broker-tick indicator warmup and observed-history calculations without random strategy inputs
+- strict strategy-plus-confirmation orchestration before a trade can reach risk
 - hard loss threshold kill-switch activation
 - kill-switch blocking in the orchestrator
 - live-mode broker rejection without fake fills and broker fill event publishing
+- rejected orders remain visible in order history
 - stop-loss and kill-switch portfolio closure
 - production control-token enforcement
 - persisted audit event reads
-- Exness MT5 adapter status, sanitized account output, quote reads, and demo order handoff
+- Exness MT5 adapter status, sanitized account output, open positions, quote reads, and demo order handoff
 
 CI is defined in `.github/workflows/ci.yml` and runs backend install, compile, tests,
 frontend install, `npm audit`, and production build.
@@ -335,10 +344,10 @@ frontend install, `npm audit`, and production build.
 ## Known Limitations
 
 - Paper mode only by default; Exness execution is limited to MT5 demo accounts.
-- Simulated market data remains available; Exness demo mode can stream configured MT5 quotes into the agents.
+- Simulated market data remains available in paper mode; Exness demo mode streams configured MT5 quotes into the agents and avoids mixed simulator/broker execution.
 - No full authentication, user authorization, rate limiting, TLS, or production CORS policy.
 - Control endpoints require `CONTROL_TOKEN` in production-like environments, but this is not a replacement for full auth.
 - Risk controls are internal simulation guardrails and still require stress testing before any live use.
-- Technical indicators are simplified simulator outputs, not live-market OHLCV calculations.
+- Broker-symbol indicators are derived from observed MT5 ticks and are still not full OHLCV candle calculations.
 - Exness integration requires a local Windows MT5 terminal and demo credentials in `backend/.env`.
 - Broker minimum lots can exceed the simulator's desired risk size on very small demo balances.

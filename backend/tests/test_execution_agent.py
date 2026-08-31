@@ -1,7 +1,7 @@
 import pytest
 
 from agents.execution_agent import ExecutionAgent, Order, OrderStatus, OrderType, TradingMode
-from core.event_bus import EventType
+from core.event_bus import Event, EventType
 
 
 @pytest.mark.asyncio
@@ -88,3 +88,43 @@ async def test_live_mode_publishes_broker_fill():
     assert published[0][1]["broker"] == "exness_mt5"
     assert published[0][1]["broker_symbol"] == "XAUUSDm"
     assert published[1][0] == EventType.POSITION_OPENED
+
+
+@pytest.mark.asyncio
+async def test_rejected_order_is_visible_in_order_history():
+    agent = ExecutionAgent(mode=TradingMode.LIVE)
+    order = Order(
+        order_id="order-3",
+        symbol="USOILm",
+        direction="BUY",
+        order_type=OrderType.MARKET,
+        quantity=1.0,
+        limit_price=None,
+        stop_price=None,
+        stop_loss=80.0,
+        take_profit=90.0,
+    )
+    agent._active_orders[order.symbol] = order.order_id
+    agent.publish = capture_noop
+
+    await agent._handle_rejection(order, "broker minimum volume risk exceeds approved risk")
+
+    assert agent.order_history[-1]["status"] == "rejected"
+    assert "broker minimum volume risk" in agent.order_history[-1]["reject_reason"]
+
+
+def test_position_close_releases_active_symbol():
+    agent = ExecutionAgent(mode=TradingMode.LIVE)
+    agent._active_orders["EURUSDm"] = "order-4"
+
+    agent._handle_position_closed(Event(
+        event_type=EventType.POSITION_CLOSED,
+        source_agent="portfolio_manager",
+        payload={"symbol": "EURUSDm", "pnl": 1.0},
+    ))
+
+    assert "EURUSDm" not in agent._active_orders
+
+
+async def capture_noop(event_type, payload, priority=5, correlation_id=None):
+    return None

@@ -147,7 +147,7 @@ function AgentMonitor({ agents }) {
 function TradeLog({ events }) {
   const relevant = events.filter(e =>
     ["order.filled", "order.rejected", "risk.breach", "risk.kill_switch",
-     "strategy.signal", "sentiment.signal"].includes(e.event_type)
+     "strategy.signal", "sentiment.signal", "macro.signal"].includes(e.event_type)
   ).slice(-40).reverse();
 
   const colors = {
@@ -157,6 +157,7 @@ function TradeLog({ events }) {
     "risk.kill_switch": "text-red-300",
     "strategy.signal": "text-cyan-400",
     "sentiment.signal": "text-violet-400",
+    "macro.signal": "text-blue-400",
   };
   const icons = {
     "order.filled": "✓",
@@ -165,6 +166,7 @@ function TradeLog({ events }) {
     "risk.kill_switch": "🔴",
     "strategy.signal": "↑",
     "sentiment.signal": "◈",
+    "macro.signal": "◆",
   };
 
   return (
@@ -175,6 +177,7 @@ function TradeLog({ events }) {
           const sym = e.payload?.symbol || "";
           const dir = e.payload?.direction || e.payload?.action || "";
           const conf = e.payload?.confidence ? ` ${(e.payload.confidence * 100).toFixed(0)}%` : "";
+          const reason = e.payload?.reason || e.payload?.reasoning || "";
           return (
             <div key={i} className="flex gap-2 px-4 py-1.5 border-b border-zinc-900 hover:bg-zinc-900/40">
               <span className="text-zinc-600 flex-shrink-0">{ts}</span>
@@ -185,6 +188,7 @@ function TradeLog({ events }) {
                 {sym && <span className="text-white">{sym} </span>}
                 {dir && <span>{dir}</span>}
                 {conf && <span className="text-zinc-400">{conf}</span>}
+                {reason && <span className="text-zinc-500"> - {String(reason).slice(0, 90)}</span>}
                 {!sym && !dir && <span className="text-zinc-500">{e.event_type}</span>}
               </span>
             </div>
@@ -421,6 +425,7 @@ function SentimentPanel({ sentiment }) {
 function BrokerPanel({ status, setStatus }) {
   const [account, setAccount] = useState(null);
   const [quote, setQuote] = useState(null);
+  const [positions, setPositions] = useState([]);
   const [symbol, setSymbol] = useState(status?.config?.symbols?.[0] || "XAUUSDm");
 
   const refreshStatus = async () => {
@@ -452,6 +457,11 @@ function BrokerPanel({ status, setStatus }) {
     const data = await apiFetch(`/broker/exness/quote/${encodeURIComponent(symbol)}`);
     if (data?.status) setStatus(data.status);
     setQuote(data?.quote || null);
+  };
+  const loadPositions = async () => {
+    const data = await apiFetch("/broker/exness/positions");
+    if (data?.status) setStatus(data.status);
+    setPositions(data?.positions || []);
   };
 
   const configured = Boolean(status?.configured);
@@ -504,6 +514,10 @@ function BrokerPanel({ status, setStatus }) {
             <div className="text-zinc-300">{status?.config?.max_order_volume ?? "--"}</div>
           </div>
         </div>
+        <div className="text-[11px] border-t border-zinc-800 pt-3">
+          <div className="text-zinc-600">Trade Symbols</div>
+          <div className="text-zinc-300 break-words">{status?.config?.trade_symbols?.join(", ") || "--"}</div>
+        </div>
         <div className="space-y-1 text-[11px] border-t border-zinc-800 pt-3">
           <div className="flex justify-between gap-3">
             <span className="text-zinc-600">Login</span>
@@ -519,12 +533,15 @@ function BrokerPanel({ status, setStatus }) {
             {status.last_error}
           </div>
         )}
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-2">
           <button onClick={connect} className="py-1.5 bg-cyan-900/30 border border-cyan-500/30 text-cyan-300 rounded hover:bg-cyan-900/50">
             Connect
           </button>
           <button onClick={loadAccount} className="py-1.5 bg-zinc-900 border border-zinc-700 text-zinc-300 rounded hover:bg-zinc-800">
             Account
+          </button>
+          <button onClick={loadPositions} className="py-1.5 bg-zinc-900 border border-zinc-700 text-zinc-300 rounded hover:bg-zinc-800">
+            Positions
           </button>
           <button onClick={disconnect} className="py-1.5 bg-zinc-900 border border-zinc-700 text-zinc-400 rounded hover:bg-zinc-800">
             Disconnect
@@ -569,6 +586,20 @@ function BrokerPanel({ status, setStatus }) {
               <div className="text-zinc-600">Ask</div>
               <div className="text-red-400">{quote.ask ?? "--"}</div>
             </div>
+          </div>
+        )}
+        {positions.length > 0 && (
+          <div className="space-y-1 text-[11px] border-t border-zinc-800 pt-3">
+            {positions.map(pos => (
+              <div key={pos.ticket || pos.symbol} className="flex items-center justify-between gap-2 bg-zinc-900/50 border border-zinc-800 rounded px-2 py-1.5">
+                <span className="text-zinc-200">{pos.symbol}</span>
+                <span className={pos.direction === "BUY" ? "text-emerald-400" : "text-red-400"}>{pos.direction}</span>
+                <span className="text-zinc-400">{pos.volume_lots} lot</span>
+                <span className={(pos.profit || 0) >= 0 ? "text-emerald-400" : "text-red-400"}>
+                  {formatSignedCurrency(pos.profit || 0)}
+                </span>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -670,6 +701,10 @@ export default function App() {
   const openPositions = portfolio?.open_positions || 0;
   const totalTrades = portfolio?.total_trades || 0;
   const totalReturn = initialCapital > 0 ? (totalPnl / initialCapital) * 100 : 0;
+  const tradeEnabled = Boolean(exnessStatus?.trade_execution_enabled);
+  const requestedTrading = Boolean(exnessStatus?.config?.demo_trading_enabled);
+  const modeLabel = tradeEnabled ? "EXNESS DEMO" : requestedTrading ? "DEMO ARMED" : "PAPER";
+  const modeColor = tradeEnabled ? "text-emerald-400" : requestedTrading ? "text-cyan-400" : "text-amber-400";
 
   return (
     <div className="min-h-screen bg-[#080a0f] text-white font-sans" style={{
@@ -691,12 +726,12 @@ export default function App() {
             </div>
             <div>
               <div className="text-sm font-bold tracking-wider text-white">NEXUS<span className="text-cyan-400">AI</span></div>
-              <div className="text-[9px] text-zinc-600 tracking-widest uppercase">Paper Trading Simulation</div>
+              <div className="text-[9px] text-zinc-600 tracking-widest uppercase">Multi-Agent Trading Simulator</div>
             </div>
           </div>
           <div className="hidden md:flex items-center gap-1 text-[10px] font-mono text-zinc-600 border-l border-zinc-800 pl-4">
             <span className="text-zinc-500">MODE:</span>
-            <span className="text-amber-400 font-bold">PAPER</span>
+            <span className={`${modeColor} font-bold`}>{modeLabel}</span>
           </div>
         </div>
 
@@ -792,8 +827,8 @@ export default function App() {
 
       {/* Footer */}
       <footer className="border-t border-zinc-800/40 px-6 py-3 flex justify-between text-[10px] font-mono text-zinc-700">
-        <span>NEXUSAI v1.0.0 — Paper Trading Simulation</span>
-        <span>⚠ PAPER TRADING ONLY — Not financial advice</span>
+        <span>NEXUSAI v1.0.0 — {modeLabel}</span>
+        <span>⚠ DEMO/PAPER ONLY — Not financial advice</span>
       </footer>
     </div>
   );

@@ -37,6 +37,9 @@ class PositionRecord:
     take_profit: float
     opened_at: float
     order_id: str
+    broker_ticket: Optional[int] = None
+    volume_lots: Optional[float] = None
+    margin_required: Optional[float] = None
     unrealized_pnl: float = 0.0
     unrealized_pnl_pct: float = 0.0
 
@@ -76,6 +79,9 @@ class PositionRecord:
             "unrealized_pnl_pct": round(self.unrealized_pnl_pct, 2),
             "opened_at": self.opened_at,
             "order_id": self.order_id,
+            "broker_ticket": self.broker_ticket,
+            "volume_lots": self.volume_lots,
+            "margin_required": self.margin_required,
         }
 
 
@@ -199,6 +205,42 @@ class PortfolioManagerAgent(BaseAgent):
     def update_capital(self, new_capital: float) -> None:
         self._initial_capital = new_capital
         self._current_capital = new_capital
+
+    def reconcile_broker_positions(self, positions: List[dict], equity: float) -> None:
+        broker_positions: Dict[str, PositionRecord] = {}
+        unrealized = 0.0
+        for p in positions:
+            symbol = p.get("symbol")
+            if not symbol:
+                continue
+            quantity = float(p.get("quantity") or 0)
+            entry = float(p.get("price_open") or 0)
+            current = float(p.get("price_current") or entry or 0)
+            profit = float(p.get("profit") or 0)
+            record = PositionRecord(
+                symbol=symbol,
+                direction=p.get("direction", "BUY"),
+                entry_price=entry,
+                quantity=quantity,
+                current_price=current,
+                stop_loss=float(p.get("stop_loss") or 0),
+                take_profit=float(p.get("take_profit") or 0),
+                opened_at=float(p.get("time") or time.time()),
+                order_id=str(p.get("ticket") or ""),
+                broker_ticket=p.get("ticket"),
+                volume_lots=p.get("volume_lots"),
+                margin_required=p.get("margin_required"),
+            )
+            record.unrealized_pnl = profit
+            cost_basis = max(abs(entry * quantity), 0.0001)
+            record.unrealized_pnl_pct = profit / cost_basis * 100
+            broker_positions[symbol] = record
+            unrealized += profit
+
+        self._positions = broker_positions
+        self._current_capital = round(equity - unrealized, 2)
+        if self._initial_capital <= 0:
+            self._initial_capital = equity
 
     @property
     def portfolio_summary(self) -> dict:

@@ -11,7 +11,6 @@ and your trained ML model inference.
 
 import asyncio
 import logging
-import random
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -48,6 +47,7 @@ class TechnicalIndicators:
     volume: float
     avg_volume: float
     atr_14: float  # Average True Range — volatility measure
+    spread_bps: Optional[float] = None
 
     @property
     def price_vs_sma20(self) -> float:
@@ -95,6 +95,7 @@ class StrategyAgent(BaseAgent):
             StrategyType.RSI_DIVERGENCE,
         ]
         self._indicators_cache: Dict[str, TechnicalIndicators] = {}
+        self._price_history: Dict[str, List[float]] = {}
         self._signal_history: List[dict] = []
         self._watchlist: List[str] = ["AAPL", "MSFT", "BTC-USD", "ETH-USD", "EUR-USD"]
 
@@ -143,27 +144,137 @@ class StrategyAgent(BaseAgent):
             if price <= 0:
                 return None
 
-            # In production these come from real calculations over OHLCV history
-            # Here we use the payload data with realistic fallbacks
-            return TechnicalIndicators(
-                symbol=symbol,
-                price=price,
-                sma_20=payload.get("sma_20", price * (1 + random.gauss(0, 0.02))),
-                sma_50=payload.get("sma_50", price * (1 + random.gauss(0, 0.03))),
-                sma_200=payload.get("sma_200", price * (1 + random.gauss(0, 0.05))),
-                rsi_14=payload.get("rsi", 50.0),
-                macd_line=payload.get("macd_line", random.gauss(0, 0.5)),
-                macd_signal=payload.get("macd_signal", random.gauss(0, 0.5)),
-                bb_upper=payload.get("bb_upper", price * 1.02),
-                bb_lower=payload.get("bb_lower", price * 0.98),
-                bb_mid=payload.get("bb_mid", price),
-                volume=payload.get("volume", 1_000_000),
-                avg_volume=payload.get("avg_volume", 900_000),
-                atr_14=payload.get("atr", price * 0.015),
-            )
+            history = self._price_history.setdefault(symbol, [])
+            history.append(price)
+            if len(history) > 240:
+                del history[:-240]
+
+            if self._payload_has_indicators(payload):
+                indicators = self._indicators_from_payload(symbol, payload, price)
+            else:
+                indicators = self._indicators_from_history(symbol, payload, history)
+
+            if indicators is None:
+                return None
+            return indicators
         except Exception as e:
             logger.error(f"Failed to build indicators for {symbol}: {e}")
             return None
+
+    def _payload_has_indicators(self, payload: dict) -> bool:
+        required = [
+            "sma_20", "sma_50", "sma_200", "rsi", "macd_line",
+            "macd_signal", "bb_upper", "bb_lower", "bb_mid", "atr",
+            "avg_volume",
+        ]
+        return all(payload.get(key) is not None for key in required)
+
+    def _indicators_from_payload(
+        self, symbol: str, payload: dict, price: float
+    ) -> TechnicalIndicators:
+        return TechnicalIndicators(
+            symbol=symbol,
+            price=price,
+            sma_20=float(payload["sma_20"]),
+            sma_50=float(payload["sma_50"]),
+            sma_200=float(payload["sma_200"]),
+            rsi_14=float(payload["rsi"]),
+            macd_line=float(payload["macd_line"]),
+            macd_signal=float(payload["macd_signal"]),
+            bb_upper=float(payload["bb_upper"]),
+            bb_lower=float(payload["bb_lower"]),
+            bb_mid=float(payload["bb_mid"]),
+            volume=float(payload["volume"]),
+            avg_volume=float(payload["avg_volume"]),
+            atr_14=float(payload["atr"]),
+            spread_bps=payload.get("spread_bps"),
+        )
+
+    def _indicators_from_history(
+        self, symbol: str, payload: dict, history: List[float]
+    ) -> Optional[TechnicalIndicators]:
+        if len(history) < 50:
+            return None
+
+        price = history[-1]
+        sma_20 = self._sma(history, 20)
+        sma_50 = self._sma(history, 50)
+        sma_200 = self._sma(history, min(200, len(history)))
+        rsi = self._rsi(history, 14)
+        ema_12 = self._ema(history, 12)
+        ema_26 = self._ema(history, 26)
+        macd_line = ema_12 - ema_26
+        macd_signal = macd_line
+        if len(history) >= 35:
+            macd_series = []
+            for idx in range(26, len(history) + 1):
+                window = history[:idx]
+                macd_series.append(self._ema(window, 12) - self._ema(window, 26))
+            macd_signal = self._ema(macd_series, min(9, len(macd_series)))
+
+        prices_20 = history[-20:]
+        std_20 = float(np.std(prices_20))
+        bb_mid = sma_20
+        bb_upper = bb_mid + 2 * std_20
+        bb_lower = bb_mid - 2 * std_20
+        atr = self._atr_from_prices(history, 14)
+        volume = float(payload.get("volume") or 0)
+        avg_volume = float(payload.get("avg_volume") or volume or 1)
+
+        return TechnicalIndicators(
+            symbol=symbol,
+            price=price,
+            sma_20=sma_20,
+            sma_50=sma_50,
+            sma_200=sma_200,
+            rsi_14=rsi,
+            macd_line=macd_line,
+            macd_signal=macd_signal,
+            bb_upper=bb_upper,
+            bb_lower=bb_lower,
+            bb_mid=bb_mid,
+            volume=volume,
+            avg_volume=avg_volume,
+            atr_14=atr,
+            spread_bps=payload.get("spread_bps"),
+        )
+
+    def _sma(self, values: List[float], period: int) -> float:
+        window = values[-period:]
+        return sum(window) / len(window)
+
+    def _ema(self, values: List[float], period: int) -> float:
+        if not values:
+            return 0.0
+        alpha = 2 / (period + 1)
+        ema = values[0]
+        for value in values[1:]:
+            ema = value * alpha + ema * (1 - alpha)
+        return ema
+
+    def _rsi(self, values: List[float], period: int = 14) -> float:
+        if len(values) < period + 1:
+            return 50.0
+        changes = [
+            values[i] - values[i - 1]
+            for i in range(len(values) - period, len(values))
+        ]
+        gains = [max(0.0, change) for change in changes]
+        losses = [abs(min(0.0, change)) for change in changes]
+        avg_gain = sum(gains) / period
+        avg_loss = sum(losses) / period
+        if avg_loss == 0:
+            return 100.0 if avg_gain > 0 else 50.0
+        rs = avg_gain / avg_loss
+        return 100 - (100 / (1 + rs))
+
+    def _atr_from_prices(self, values: List[float], period: int = 14) -> float:
+        recent = values[-period:]
+        if len(recent) < 2:
+            return max(values[-1] * 0.001, 0.00001)
+        ranges = [abs(recent[i] - recent[i - 1]) for i in range(1, len(recent))]
+        atr = sum(ranges) / len(ranges)
+        return max(atr, values[-1] * 0.00005)
 
     def _run_strategy(
         self, strategy: StrategyType, ind: TechnicalIndicators
@@ -329,13 +440,19 @@ class StrategyAgent(BaseAgent):
             "reasoning": signal["reasoning"],
             "strategy_count": signal["strategy_count"],
             "price": ind.price,
+            "spread_bps": ind.spread_bps,
             "indicators": {
                 "price": ind.price,
                 "rsi": ind.rsi_14,
                 "sma_20": ind.sma_20,
+                "sma_50": ind.sma_50,
+                "sma_200": ind.sma_200,
                 "macd_histogram": ind.macd_histogram,
+                "macd_line": ind.macd_line,
+                "macd_signal": ind.macd_signal,
                 "bb_position": ind.bb_position,
                 "volume_ratio": ind.volume_ratio,
+                "atr": ind.atr_14,
             },
             "ttl_seconds": 120.0,
         }

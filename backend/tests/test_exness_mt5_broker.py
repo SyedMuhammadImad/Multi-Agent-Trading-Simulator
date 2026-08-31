@@ -128,6 +128,77 @@ def test_exness_quote_reads_bid_ask_from_mt5():
     }
 
 
+def test_exness_positions_returns_public_broker_snapshot():
+    Position = namedtuple(
+        "Position",
+        "ticket symbol type volume price_open price_current sl tp profit time",
+    )
+    Info = namedtuple("Info", "trade_contract_size")
+
+    class FakeMT5:
+        ORDER_TYPE_BUY = 0
+        ORDER_TYPE_SELL = 1
+        POSITION_TYPE_BUY = 0
+
+        def initialize(self, **kwargs):
+            return True
+
+        def account_info(self):
+            return {"login": 12345678, "trade_mode": 0}
+
+        def positions_get(self):
+            return [
+                Position(
+                    ticket=77,
+                    symbol="USOILm",
+                    type=0,
+                    volume=0.01,
+                    price_open=84.0,
+                    price_current=84.5,
+                    sl=83.0,
+                    tp=86.0,
+                    profit=5.0,
+                    time=123,
+                )
+            ]
+
+        def symbol_info(self, symbol):
+            return Info(trade_contract_size=1000.0)
+
+        def order_calc_margin(self, order_type, symbol, volume, price):
+            return 0.42
+
+        def last_error(self):
+            return (0, "OK")
+
+    config = ExnessMT5Config(
+        login=12345678,
+        password="secret-password",
+        server="Exness-MT5Trial",
+        terminal_path="",
+        symbols=("USOILm",),
+    )
+    broker = ExnessMT5ReadOnlyBroker(config=config, mt5_module=FakeMT5())
+
+    result = broker.positions()
+
+    assert result["positions"] == [{
+        "ticket": 77,
+        "symbol": "USOILm",
+        "direction": "BUY",
+        "volume_lots": 0.01,
+        "quantity": 10.0,
+        "price_open": 84.0,
+        "price_current": 84.5,
+        "stop_loss": 83.0,
+        "take_profit": 86.0,
+        "profit": 5.0,
+        "margin_required": 0.42,
+        "notional_usd": 845.0,
+        "time": 123,
+    }]
+
+
 def test_exness_demo_order_uses_order_check_and_order_send():
     Tick = namedtuple("Tick", "bid ask last time time_msc")
     Info = namedtuple("Info", "trade_contract_size volume_min volume_max volume_step")

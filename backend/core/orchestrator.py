@@ -50,6 +50,9 @@ class AgentSignal:
     confidence: float  # 0.0 - 1.0
     reasoning: str
     price: float = 0.0
+    indicators: Dict[str, float] = field(default_factory=dict)
+    spread_bps: Optional[float] = None
+    event_type: str = ""
     timestamp: float = field(default_factory=time.time)
     ttl_seconds: float = 60.0  # Signal validity window
 
@@ -64,6 +67,21 @@ class AgentSignal:
             multiplier = 0.0
         return self.confidence * agent_weight * multiplier
 
+    def to_dict(self) -> dict:
+        return {
+            "agent_id": self.agent_id,
+            "symbol": self.symbol,
+            "direction": self.direction.value,
+            "confidence": round(self.confidence, 4),
+            "reasoning": self.reasoning,
+            "price": self.price,
+            "indicators": self.indicators,
+            "spread_bps": self.spread_bps,
+            "event_type": self.event_type,
+            "timestamp": self.timestamp,
+            "ttl_seconds": self.ttl_seconds,
+        }
+
 
 @dataclass
 class OrchestratorDecision:
@@ -75,6 +93,7 @@ class OrchestratorDecision:
     consensus_pct: float
     final_confidence: float
     reasoning: List[str]
+    signal_details: List[dict] = field(default_factory=list)
     timestamp: float = field(default_factory=time.time)
     blocked_by: Optional[str] = None
 
@@ -87,6 +106,7 @@ class OrchestratorDecision:
             "consensus_pct": round(self.consensus_pct, 2),
             "final_confidence": round(self.final_confidence, 4),
             "reasoning": self.reasoning,
+            "signal_details": self.signal_details,
             "timestamp": self.timestamp,
             "blocked_by": self.blocked_by,
         }
@@ -97,6 +117,7 @@ class OrchestratorDecision:
 DEFAULT_AGENT_WEIGHTS: Dict[str, float] = {
     "strategy_agent": 0.30,
     "sentiment_agent": 0.15,
+    "broker_confirmation_agent": 0.15,
     "macro_agent": 0.15,
     "risk_agent": 0.20,       # Risk is special — see veto logic below
     "arbitrage_agent": 0.10,
@@ -180,6 +201,9 @@ class MasterOrchestrator(BaseAgent):
             confidence=float(payload.get("confidence", 0.5)),
             reasoning=payload.get("reasoning", ""),
             price=float(payload.get("price", 0) or 0),
+            indicators=payload.get("indicators", {}) or {},
+            spread_bps=payload.get("spread_bps"),
+            event_type=event.event_type.value,
             ttl_seconds=payload.get("ttl_seconds", 60.0),
         )
 
@@ -272,9 +296,17 @@ class MasterOrchestrator(BaseAgent):
         """Map scores to actionable decisions."""
         action = TradeAction.HOLD
         final_confidence = abs(composite_score) * consensus_pct
+        target_direction = (
+            "BUY" if composite_score >= BUY_THRESHOLD
+            else "SELL" if composite_score <= SELL_THRESHOLD
+            else "HOLD"
+        )
+        gate_passed, gate_reasons = self._strict_trade_gate(signals, target_direction)
 
         if consensus_pct < MIN_CONSENSUS_PCT:
             reasons.append(f"No consensus ({consensus_pct:.0%} < {MIN_CONSENSUS_PCT:.0%}) → HOLD")
+        elif target_direction in {"BUY", "SELL"} and not gate_passed:
+            reasons.extend(gate_reasons)
         elif composite_score >= BUY_THRESHOLD:
             action = TradeAction.EXECUTE_BUY
         elif composite_score <= SELL_THRESHOLD:
@@ -290,7 +322,46 @@ class MasterOrchestrator(BaseAgent):
             consensus_pct=consensus_pct,
             final_confidence=final_confidence,
             reasoning=reasons,
+            signal_details=[signal.to_dict() for signal in signals],
+            blocked_by="strict_agent_gate" if gate_reasons else None,
         )
+
+    def _strict_trade_gate(
+        self, signals: List[AgentSignal], target_direction: str
+    ) -> Tuple[bool, List[str]]:
+        if target_direction not in {"BUY", "SELL"}:
+            return True, []
+
+        reasons = []
+        strategy = next((s for s in signals if s.agent_id == "strategy_agent"), None)
+        if strategy is None:
+            reasons.append("Strict gate: missing Strategy Agent signal → HOLD")
+        elif strategy.direction.value != target_direction:
+            reasons.append(
+                f"Strict gate: Strategy Agent is {strategy.direction.value}, not {target_direction} → HOLD"
+            )
+
+        confirmation_agents = {"sentiment_agent", "broker_confirmation_agent", "macro_agent"}
+        confirmations = [
+            s for s in signals
+            if s.agent_id in confirmation_agents and s.direction.value == target_direction
+        ]
+        if not confirmations:
+            reasons.append(
+                f"Strict gate: no independent confirmation agrees with {target_direction} → HOLD"
+            )
+
+        blockers = [
+            s.agent_id for s in signals
+            if s.agent_id in confirmation_agents
+            and s.direction.value not in {target_direction, "HOLD"}
+        ]
+        if blockers:
+            reasons.append(
+                f"Strict gate: opposing confirmation from {', '.join(sorted(blockers))} → HOLD"
+            )
+
+        return not reasons, reasons
 
     async def _dispatch_decision(self, decision: OrchestratorDecision) -> None:
         """Turn a decision into an order request."""
@@ -304,13 +375,27 @@ class MasterOrchestrator(BaseAgent):
             "composite_score": decision.composite_score,
             "reasoning": decision.reasoning,
             "orchestrator_decision": decision.to_dict(),
+            "agent_signals": decision.signal_details,
         }
-        signal_prices = [
-            signal.price for signal in self._pending_signals.get(decision.symbol, [])
-            if not signal.is_expired and signal.price > 0
+        active_signals = [
+            signal for signal in self._pending_signals.get(decision.symbol, [])
+            if not signal.is_expired
         ]
+        signal_prices = [signal.price for signal in active_signals if signal.price > 0]
         if signal_prices:
             order_payload["price"] = signal_prices[-1]
+        strategy_signals = [
+            signal for signal in active_signals
+            if signal.agent_id == "strategy_agent" and signal.indicators
+        ]
+        if strategy_signals:
+            order_payload["indicators"] = strategy_signals[-1].indicators
+        spread_values = [
+            signal.spread_bps for signal in active_signals
+            if signal.spread_bps is not None
+        ]
+        if spread_values:
+            order_payload["spread_bps"] = spread_values[-1]
 
         await self.publish(
             EventType.ORDER_REQUESTED,

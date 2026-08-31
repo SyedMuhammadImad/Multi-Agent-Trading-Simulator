@@ -1,9 +1,8 @@
 """
-Read-only Exness MT5 demo integration.
+Exness MT5 demo integration.
 
-This adapter deliberately has no order-placement method. It is only for
-connection checks, account snapshots, and symbol quotes from a local MT5
-terminal logged into an Exness demo account.
+This adapter supports account snapshots, symbol quotes, broker position
+reconciliation, and guarded order placement for local MT5 demo accounts.
 """
 
 from __future__ import annotations
@@ -139,7 +138,7 @@ class ExnessMT5Config:
         }
 
 
-class ExnessMT5ReadOnlyBroker:
+class ExnessMT5DemoBroker:
     def __init__(self, config: Optional[ExnessMT5Config] = None, mt5_module: Any = None):
         self.config = config or ExnessMT5Config.from_env()
         self._mt5 = mt5_module
@@ -281,6 +280,53 @@ class ExnessMT5ReadOnlyBroker:
         if "login" in safe_account:
             safe_account["login"] = _mask_login(safe_account["login"])
         return {"status": self.status(), "account": safe_account}
+
+    def positions(self) -> Dict[str, Any]:
+        status = self.connect() if not self._connected else self.status()
+        if not status["connected"]:
+            return {"status": status, "positions": []}
+
+        positions = []
+        for position in self._mt5.positions_get() or ():
+            positions.append(self._public_position(position))
+        return {"status": self.status(), "positions": positions}
+
+    def _public_position(self, position: Any) -> Dict[str, Any]:
+        data = _to_dict(position)
+        symbol = data.get("symbol")
+        volume = float(data.get("volume") or 0)
+        price_open = float(data.get("price_open") or 0)
+        price_current = float(data.get("price_current") or price_open or 0)
+        position_type = data.get("type")
+        buy_type = getattr(self._mt5, "POSITION_TYPE_BUY", 0)
+        direction = "BUY" if position_type == buy_type else "SELL"
+        contract_size = 1.0
+        margin_required = None
+        notional_usd = None
+
+        if symbol:
+            info = _to_dict(self._mt5.symbol_info(symbol))
+            contract_size = float(info.get("trade_contract_size") or 1.0)
+            order_type = self._mt5.ORDER_TYPE_BUY if direction == "BUY" else self._mt5.ORDER_TYPE_SELL
+            margin = self._mt5.order_calc_margin(order_type, symbol, volume, price_current)
+            margin_required = round(float(margin), 2) if margin is not None else None
+            notional_usd = round(price_current * volume * contract_size, 2)
+
+        return {
+            "ticket": data.get("ticket"),
+            "symbol": symbol,
+            "direction": direction,
+            "volume_lots": volume,
+            "quantity": volume * contract_size,
+            "price_open": price_open,
+            "price_current": price_current,
+            "stop_loss": data.get("sl"),
+            "take_profit": data.get("tp"),
+            "profit": float(data.get("profit") or 0),
+            "margin_required": margin_required,
+            "notional_usd": notional_usd,
+            "time": data.get("time"),
+        }
 
     def quote(self, symbol: str) -> Dict[str, Any]:
         broker_symbol = self._resolve_symbol(symbol)
@@ -584,3 +630,6 @@ class ExnessMT5ReadOnlyBroker:
 
 def _sanitize_request(request: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in request.items() if key not in {"password"}}
+
+
+ExnessMT5ReadOnlyBroker = ExnessMT5DemoBroker

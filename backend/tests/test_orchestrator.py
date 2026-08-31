@@ -8,6 +8,8 @@ def signal(source_agent, direction="BUY", price=95_000):
     event_type = (
         EventType.STRATEGY_SIGNAL
         if source_agent == "strategy_agent"
+        else EventType.MACRO_SIGNAL
+        if source_agent == "broker_confirmation_agent"
         else EventType.SENTIMENT_SIGNAL
     )
     return Event(
@@ -19,6 +21,7 @@ def signal(source_agent, direction="BUY", price=95_000):
             "confidence": 0.95,
             "reasoning": "test signal",
             "price": price,
+            "indicators": {"atr": 10.0},
         },
     )
 
@@ -42,6 +45,48 @@ async def test_orchestrator_dispatches_order_with_flat_signal_price():
     assert orders[0]["symbol"] == "BTC-USD"
     assert orders[0]["action"] == "EXECUTE_BUY"
     assert orders[0]["price"] == 95_000
+    assert orders[0]["indicators"]["atr"] == 10.0
+    assert orders[0]["agent_signals"]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_blocks_without_independent_confirmation():
+    orchestrator = MasterOrchestrator()
+    orchestrator._cooldown_seconds = 0
+    published = []
+
+    async def capture(event_type, payload, priority=5, correlation_id=None):
+        published.append((event_type, payload, priority, correlation_id))
+
+    orchestrator.publish = capture
+
+    await orchestrator.process_event(signal("strategy_agent"))
+    await orchestrator.process_event(signal("unknown_agent"))
+
+    assert [
+        payload for event_type, payload, _, _ in published
+        if event_type == EventType.ORDER_REQUESTED
+    ] == []
+    assert orchestrator.recent_decisions[-1]["blocked_by"] == "strict_agent_gate"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_accepts_broker_confirmation_agent():
+    orchestrator = MasterOrchestrator()
+    orchestrator._cooldown_seconds = 0
+    published = []
+
+    async def capture(event_type, payload, priority=5, correlation_id=None):
+        published.append((event_type, payload, priority, correlation_id))
+
+    orchestrator.publish = capture
+
+    await orchestrator.process_event(signal("strategy_agent"))
+    await orchestrator.process_event(signal("broker_confirmation_agent"))
+
+    orders = [payload for event_type, payload, _, _ in published if event_type == EventType.ORDER_REQUESTED]
+    assert len(orders) == 1
+    assert orders[0]["action"] == "EXECUTE_BUY"
 
 
 @pytest.mark.asyncio

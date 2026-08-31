@@ -114,11 +114,16 @@ class ExecutionAgent(BaseAgent):
         # Listen for approved risk assessments (these are cleared for execution)
         self.bus.subscribe(EventType.RISK_ASSESSMENT, self.handle_event)
         self.bus.subscribe(EventType.KILL_SWITCH_ACTIVATED, self.handle_event)
+        self.bus.subscribe(EventType.POSITION_CLOSED, self.handle_event)
         logger.info(f"Execution Agent initialized | mode={self.mode.value}")
 
     async def process_event(self, event: Event) -> None:
         if event.event_type == EventType.KILL_SWITCH_ACTIVATED:
             await self._cancel_all_pending()
+            return
+
+        if event.event_type == EventType.POSITION_CLOSED:
+            self._handle_position_closed(event)
             return
 
         if event.event_type == EventType.RISK_ASSESSMENT:
@@ -361,11 +366,23 @@ class ExecutionAgent(BaseAgent):
         order.status = OrderStatus.REJECTED
         if order.symbol in self._active_orders:
             del self._active_orders[order.symbol]
+        self._order_history.append({**order.to_dict(), "reject_reason": reason})
         await self.publish(
             EventType.ORDER_REJECTED,
             {"order_id": order.order_id, "symbol": order.symbol, "reason": reason},
             priority=3,
         )
+
+    def _handle_position_closed(self, event) -> None:
+        symbol = event.payload.get("symbol")
+        if symbol and symbol in self._active_orders:
+            del self._active_orders[symbol]
+
+    def reconcile_open_symbols(self, open_symbols: set[str]) -> None:
+        for symbol, order_id in list(self._active_orders.items()):
+            order = self._orders.get(order_id)
+            if order and order.status == OrderStatus.FILLED and symbol not in open_symbols:
+                del self._active_orders[symbol]
 
     def set_live_broker(self, broker_client) -> None:
         """Inject broker client for live trading."""

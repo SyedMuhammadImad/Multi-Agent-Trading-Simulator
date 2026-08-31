@@ -181,6 +181,7 @@ class RiskManagementAgent(BaseAgent):
             "exposure": self._check_total_exposure(),
             "position_count": self._check_position_count(symbol),
             "vix_filter": self._check_vix_conditions(),
+            "spread": self._check_spread(payload),
         }
 
         failed = {k: v for k, v in checks.items() if not v["pass"]}
@@ -218,7 +219,10 @@ class RiskManagementAgent(BaseAgent):
             )
             return
 
-        atr = price * 0.015  # Fallback ATR estimate
+        indicators = payload.get("indicators", {}) or {}
+        atr = float(indicators.get("atr") or payload.get("atr") or 0)
+        if atr <= 0:
+            atr = price * 0.015  # Conservative fallback when no observed ATR exists
 
         sizing = self._calculate_position_size(
             symbol=symbol,
@@ -355,6 +359,18 @@ class RiskManagementAgent(BaseAgent):
             return {"pass": False, "reason": f"VIX extreme ({self._current_vix:.1f}) — no new positions"}
         return {"pass": True, "reason": ""}
 
+    def _check_spread(self, payload: dict) -> dict:
+        spread_bps = payload.get("spread_bps")
+        if spread_bps is None:
+            return {"pass": True, "reason": ""}
+        spread_bps = float(spread_bps)
+        if spread_bps > self.params.max_slippage_bps:
+            return {
+                "pass": False,
+                "reason": f"Spread {spread_bps:.1f} bps > max {self.params.max_slippage_bps} bps",
+            }
+        return {"pass": True, "reason": ""}
+
     def _get_vix_multiplier(self) -> float:
         """Reduce position sizes when volatility is elevated."""
         if self._current_vix >= self.params.extreme_vix_threshold:
@@ -464,6 +480,28 @@ class RiskManagementAgent(BaseAgent):
             "max_total_exposure_pct": self.params.max_total_exposure_pct,
             "max_daily_loss_pct": self.params.max_daily_loss_pct,
             "max_drawdown_pct": self.params.max_drawdown_pct,
+            "max_slippage_bps": self.params.max_slippage_bps,
             "current_vix": self._current_vix,
             "vix_multiplier": self._get_vix_multiplier(),
         }
+
+    def reconcile_broker_positions(self, positions: List[dict], equity: float) -> None:
+        """Trust the broker snapshot for deployed capital and account equity."""
+        self.portfolio.positions = {
+            p["symbol"]: {
+                "entry_price": p.get("price_open", 0),
+                "direction": p.get("direction", "BUY"),
+                "size_usd": float(p.get("margin_required") or p.get("notional_usd") or 0),
+                "stop_loss": p.get("stop_loss"),
+                "take_profit": p.get("take_profit"),
+                "opened_at": p.get("time", time.time()),
+            }
+            for p in positions
+            if p.get("symbol")
+        }
+        deployed = sum(float(p.get("margin_required") or p.get("notional_usd") or 0) for p in positions)
+        self.portfolio.total_capital = equity
+        self.portfolio.deployed_capital = deployed
+        self.portfolio.available_capital = max(0.0, equity - deployed)
+        if equity > self.portfolio.peak_capital:
+            self.portfolio.peak_capital = equity

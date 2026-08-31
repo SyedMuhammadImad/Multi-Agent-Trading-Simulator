@@ -52,7 +52,7 @@ from agents.sentiment_agent import SentimentAgent
 from agents.broker_confirmation_agent import BrokerMomentumConfirmationAgent
 from agents.portfolio_regime_agents import PortfolioManagerAgent, RegimeDetectionAgent
 from agents.advanced_agents import ComplianceAgent, BacktestingAgent, LearningAgent
-from brokers.exness_mt5 import ExnessMT5ReadOnlyBroker
+from brokers.exness_mt5 import ExnessMT5DemoBroker
 from data.pipeline import MarketDataPipeline
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,14 @@ CONTROL_TOKEN = os.getenv("CONTROL_TOKEN", "")
 CONTROL_TOKEN_REQUIRED_ENVS = {"production", "prod", "staging"}
 TRADING_MODE_ENV = os.getenv("TRADING_MODE", "paper").strip().lower()
 EXNESS_MARKET_DATA_INTERVAL = float(os.getenv("EXNESS_MARKET_DATA_INTERVAL", "2.0"))
+EXNESS_RECONCILE_INTERVAL = float(os.getenv("EXNESS_RECONCILE_INTERVAL", "5.0"))
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS", "http://localhost:3000,http://localhost:5173"
+    ).split(",")
+    if origin.strip()
+]
 
 # ─── System singleton ─────────────────────────────────────────────────────────
 class TradingSystem:
@@ -75,7 +83,7 @@ class TradingSystem:
     compliance_agent: Optional[ComplianceAgent] = None
     backtest_agent: Optional[BacktestingAgent] = None
     learning_agent: Optional[LearningAgent] = None
-    exness_broker: Optional[ExnessMT5ReadOnlyBroker] = None
+    exness_broker: Optional[ExnessMT5DemoBroker] = None
     data_pipeline: Optional[MarketDataPipeline] = None
     initialized: bool = False
 
@@ -138,7 +146,7 @@ async def lifespan(app: FastAPI):
     system.compliance_agent = ComplianceAgent()
     system.backtest_agent = BacktestingAgent()
     system.learning_agent = LearningAgent(orchestrator=system.orchestrator)
-    system.exness_broker = ExnessMT5ReadOnlyBroker()
+    system.exness_broker = ExnessMT5DemoBroker()
     if _exness_demo_mode_requested():
         confirmation_symbols = list(system.exness_broker.config.symbols)
         system.broker_confirmation_agent = BrokerMomentumConfirmationAgent(
@@ -167,6 +175,9 @@ async def lifespan(app: FastAPI):
         system.broker_confirmation_agent,
         system.portfolio_manager,
         system.regime_agent,
+        system.compliance_agent,
+        system.backtest_agent,
+        system.learning_agent,
     ]
     agents = [agent for agent in agents if agent is not None]
     
@@ -177,16 +188,21 @@ async def lifespan(app: FastAPI):
         _configure_exness_agent_inputs()
         _sync_exness_demo_capital()
 
-    # Start event bus and data pipeline concurrently
+    # Start event bus and the correct data source for the selected trading mode.
     bus = get_event_bus()
     asyncio.create_task(bus.start())
-    asyncio.create_task(system.data_pipeline.start())
+    if not _exness_demo_mode_requested():
+        asyncio.create_task(system.data_pipeline.start())
     
     # Hook database persistence to event bus
     bus = get_event_bus()
 
     async def _persist_event(event):
-        if event.event_type == EventType.AGENT_STATUS:
+        if event.event_type in {
+            EventType.AGENT_STATUS,
+            EventType.MARKET_DATA_UPDATE,
+            EventType.SYSTEM_HEARTBEAT,
+        }:
             return
         await save_event(
             event.event_type.value,
@@ -221,6 +237,7 @@ async def lifespan(app: FastAPI):
     system.initialized = True
     if _exness_demo_mode_requested():
         asyncio.create_task(_stream_exness_market_data())
+        asyncio.create_task(_reconcile_exness_broker_state())
     logger.info("✅ Trading system fully initialized — all agents running")
 
     yield  # Application runs here
@@ -236,7 +253,7 @@ async def lifespan(app: FastAPI):
 
 # ─── FastAPI app ──────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="AI Paper Trading Simulation",
+    title="AI Multi-Agent Trading Simulator",
     description="Multi-agent paper-trading simulation. Not production ready.",
     version="1.0.0",
     lifespan=lifespan,
@@ -244,7 +261,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # React dev servers
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -370,7 +387,7 @@ async def get_orders():
     return {
         "open_orders": system.execution_agent.open_orders,
         "order_history": system.execution_agent.order_history,
-        "mode": system.execution_agent.trading_mode,
+        "mode": "exness_demo" if _exness_demo_mode_requested() else system.execution_agent.trading_mode,
     }
 
 
@@ -433,6 +450,13 @@ async def get_exness_account():
     if not system.exness_broker:
         raise HTTPException(503, "Exness broker adapter not initialized")
     return system.exness_broker.account_info()
+
+
+@app.get("/api/broker/exness/positions", dependencies=[Depends(require_control_access)])
+async def get_exness_positions():
+    if not system.exness_broker:
+        raise HTTPException(503, "Exness broker adapter not initialized")
+    return system.exness_broker.positions()
 
 
 @app.get("/api/broker/exness/quote/{symbol}", dependencies=[Depends(require_control_access)])
@@ -538,6 +562,8 @@ async def update_watchlist(request: SymbolWatchlistRequest):
     if request.action == "add":
         system.strategy_agent.add_to_watchlist(symbol)
         system.sentiment_agent.add_symbol(symbol)
+        if system.broker_confirmation_agent:
+            system.broker_confirmation_agent.add_symbol(symbol)
         return {"status": "added", "symbol": symbol, "watchlist": system.strategy_agent.watchlist}
     elif request.action == "remove":
         system.strategy_agent.remove_from_watchlist(symbol)
@@ -648,6 +674,9 @@ def _get_all_agents():
             system.broker_confirmation_agent,
             system.portfolio_manager,
             system.regime_agent,
+            system.compliance_agent,
+            system.backtest_agent,
+            system.learning_agent,
         ] if a is not None
     ]
 
@@ -689,6 +718,8 @@ def _configure_exness_agent_inputs() -> None:
             system.strategy_agent.add_to_watchlist(symbol)
         if system.sentiment_agent:
             system.sentiment_agent.add_symbol(symbol)
+        if system.broker_confirmation_agent:
+            system.broker_confirmation_agent.add_symbol(symbol)
 
 
 def _sync_exness_demo_capital() -> None:
@@ -724,6 +755,30 @@ async def _stream_exness_market_data() -> None:
                     priority=4,
                 ))
         await asyncio.sleep(max(0.5, EXNESS_MARKET_DATA_INTERVAL))
+
+
+async def _reconcile_exness_broker_state() -> None:
+    if not system.exness_broker:
+        return
+    while system.initialized:
+        try:
+            account_result = system.exness_broker.account_info()
+            account = account_result.get("account") or {}
+            equity = float(account.get("equity") or account.get("balance") or 0)
+            position_result = system.exness_broker.positions()
+            positions = position_result.get("positions") or []
+            if equity > 0:
+                if system.portfolio_manager:
+                    system.portfolio_manager.reconcile_broker_positions(positions, equity)
+                if system.risk_agent:
+                    system.risk_agent.reconcile_broker_positions(positions, equity)
+                if system.execution_agent:
+                    system.execution_agent.reconcile_open_symbols(
+                        {p.get("symbol") for p in positions if p.get("symbol")}
+                    )
+        except Exception:
+            logger.error("Exness broker reconciliation failed", exc_info=True)
+        await asyncio.sleep(max(1.0, EXNESS_RECONCILE_INTERVAL))
 
 
 if __name__ == "__main__":

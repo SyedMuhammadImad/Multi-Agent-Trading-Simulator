@@ -19,6 +19,17 @@ def test_exness_status_reports_missing_config_without_connecting(monkeypatch):
     assert "EXNESS_DEMO_LOGIN" in status["last_error"]
 
 
+def test_exness_config_preserves_symbol_case(monkeypatch):
+    monkeypatch.setenv("EXNESS_DEMO_LOGIN", "12345678")
+    monkeypatch.setenv("EXNESS_DEMO_PASSWORD", "secret-password")
+    monkeypatch.setenv("EXNESS_DEMO_SERVER", "Exness-MT5Trial")
+    monkeypatch.setenv("EXNESS_SYMBOLS", "XAUUSDm,EURUSDm,BTCUSDm")
+
+    config = ExnessMT5Config.from_env()
+
+    assert config.symbols == ("XAUUSDm", "EURUSDm", "BTCUSDm")
+
+
 def test_exness_account_info_masks_login_and_exposes_safe_fields():
     Account = namedtuple(
         "Account",
@@ -57,7 +68,7 @@ def test_exness_account_info_masks_login_and_exposes_safe_fields():
         password="secret-password",
         server="Exness-MT5Trial",
         terminal_path="",
-        symbols=("XAUUSDM",),
+        symbols=("XAUUSDm",),
     )
     broker = ExnessMT5ReadOnlyBroker(config=config, mt5_module=FakeMT5())
 
@@ -98,15 +109,16 @@ def test_exness_quote_reads_bid_ask_from_mt5():
         password="secret-password",
         server="Exness-MT5Trial",
         terminal_path="",
-        symbols=("XAUUSDM",),
+        symbols=("XAUUSDm",),
     )
     broker = ExnessMT5ReadOnlyBroker(config=config, mt5_module=FakeMT5())
 
     result = broker.quote("xauusdm")
 
     assert result["status"]["connected"] is True
+    assert broker._mt5.selected == ("XAUUSDm", True)
     assert result["quote"] == {
-        "symbol": "XAUUSDM",
+        "symbol": "XAUUSDm",
         "bid": 2301.25,
         "ask": 2301.55,
         "last": 2301.40,

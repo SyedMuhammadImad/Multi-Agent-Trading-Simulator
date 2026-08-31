@@ -50,7 +50,7 @@ class ExnessMT5Config:
         raw_login = os.getenv("EXNESS_DEMO_LOGIN", "").strip()
         login = int(raw_login) if raw_login.isdigit() else None
         raw_symbols = os.getenv("EXNESS_SYMBOLS", "XAUUSDm,EURUSDm,BTCUSDm")
-        symbols = tuple(s.strip().upper() for s in raw_symbols.split(",") if s.strip())
+        symbols = tuple(s.strip() for s in raw_symbols.split(",") if s.strip())
         return cls(
             login=login,
             password=os.getenv("EXNESS_DEMO_PASSWORD", ""),
@@ -170,6 +170,13 @@ class ExnessMT5ReadOnlyBroker:
             self._connected_at = None
         return self.status()
 
+    def _resolve_symbol(self, symbol: str) -> str:
+        requested = symbol.strip()
+        for configured_symbol in self.config.symbols:
+            if configured_symbol.casefold() == requested.casefold():
+                return configured_symbol
+        return requested
+
     def account_info(self) -> Dict[str, Any]:
         status = self.connect() if not self._connected else self.status()
         if not status["connected"]:
@@ -196,25 +203,25 @@ class ExnessMT5ReadOnlyBroker:
         return {"status": self.status(), "account": safe_account}
 
     def quote(self, symbol: str) -> Dict[str, Any]:
-        normalized = symbol.strip().upper()
-        if not normalized:
+        broker_symbol = self._resolve_symbol(symbol)
+        if not broker_symbol:
             return {"status": self.status(), "quote": None, "error": "symbol is required"}
 
         status = self.connect() if not self._connected else self.status()
         if not status["connected"]:
             return {"status": status, "quote": None}
 
-        self._mt5.symbol_select(normalized, True)
-        tick = self._mt5.symbol_info_tick(normalized)
+        self._mt5.symbol_select(broker_symbol, True)
+        tick = self._mt5.symbol_info_tick(broker_symbol)
         if tick is None:
-            self._last_error = f"MT5 symbol_info_tick failed for {normalized}: {self._mt5.last_error()}"
+            self._last_error = f"MT5 symbol_info_tick failed for {broker_symbol}: {self._mt5.last_error()}"
             return {"status": self.status(), "quote": None}
 
         data = _to_dict(tick)
         return {
             "status": self.status(),
             "quote": {
-                "symbol": normalized,
+                "symbol": broker_symbol,
                 "bid": data.get("bid"),
                 "ask": data.get("ask"),
                 "last": data.get("last"),

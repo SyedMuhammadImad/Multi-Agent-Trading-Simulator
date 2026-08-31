@@ -17,6 +17,18 @@ def order_request(price, symbol="BTC-USD", action="EXECUTE_BUY"):
     )
 
 
+def test_update_capital_resets_empty_portfolio_baselines():
+    agent = RiskManagementAgent(initial_capital=100_000.0)
+
+    agent.update_capital(100.0)
+
+    state = agent.portfolio_state
+    assert state["total_capital"] == 100.0
+    assert state["available_capital"] == 100.0
+    assert state["drawdown_pct"] == 0.0
+    assert state["daily_loss_pct"] == 0.0
+
+
 @pytest.mark.asyncio
 async def test_risk_agent_rejects_missing_or_zero_price_without_silent_fallback():
     agent = RiskManagementAgent()

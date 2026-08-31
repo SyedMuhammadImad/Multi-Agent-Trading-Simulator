@@ -226,7 +226,7 @@ All six original checklist items are **complete and verified**.
 ## 8. Iteration 3 — Real NewsAPI + phantom-trade purge
 
 ### User request
-"9f49a1a2f7bb4c4a87937f837dce6e2c this is the api key for news use this and update the code."
+"[redacted NewsAPI key] this is the api key for news use this and update the code."
 
 ### What I did
 1. **Confirmed how the backend loads env:** `main.py` calls
@@ -234,7 +234,7 @@ All six original checklist items are **complete and verified**.
    (auto-loaded at startup). The sentiment agent already reads `os.getenv("NEWS_API_KEY")`
    and already has the full `_fetch_newsapi()` real-news path — so **no agent code change was
    needed**, only configuration.
-2. **Added `NEWS_API_KEY=9f49...e6e2c` to `backend/.env`** (appended via a safe PowerShell
+2. **Added `NEWS_API_KEY` to `backend/.env`** (appended via a safe PowerShell
    command; existing secrets untouched; key length verified = 32).
 3. **Restarted the backend** so the new env var is picked up.
 4. **Verified `real_news: true`** in `/api/stats` `sentiment_nlp`, with `articles_processed`

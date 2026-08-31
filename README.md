@@ -89,7 +89,7 @@ git-ignored and should never be committed.
 
 | Variable | Default | Description |
 |---|---|---|
-| `TRADING_MODE` | `paper` | `paper` = simulated fills only |
+| `TRADING_MODE` | `paper` | `paper` = simulated fills only; `exness_demo` = MT5 demo broker execution |
 | `INITIAL_CAPITAL` | `100000` | Starting paper capital |
 | `MAX_PORTFOLIO_RISK_PCT` | `0.02` | Max capital at risk per trade |
 | `MAX_DAILY_LOSS_PCT` | `0.05` | Kill-switch trigger (5%) |
@@ -100,12 +100,16 @@ git-ignored and should never be committed.
 | `APP_ENV` | `development` | Set `production`, `prod`, or `staging` to require a control token |
 | `CONTROL_TOKEN` | _(unset)_ | Required as `X-Control-Token` for `/api/controls/*` in production-like environments |
 | `NEWS_API_KEY` | _(unset)_ | **NewsAPI.org key for real news sentiment** |
-| `BROKER` | _(unset)_ | Set `exness_mt5` to enable the read-only Exness MT5 demo adapter |
+| `BROKER` | _(unset)_ | Set `exness_mt5` to use the Exness MT5 demo adapter |
 | `EXNESS_DEMO_LOGIN` | _(unset)_ | Exness MT5 demo account number |
 | `EXNESS_DEMO_PASSWORD` | _(unset)_ | Exness MT5 demo password; never commit this |
 | `EXNESS_DEMO_SERVER` | _(unset)_ | Exness MT5 demo server name |
 | `EXNESS_MT5_PATH` | _(unset)_ | Optional path to `terminal64.exe` |
-| `EXNESS_SYMBOLS` | `XAUUSDm,EURUSDm,BTCUSDm` | Default symbols for the dashboard quote panel |
+| `EXNESS_SYMBOLS` | `XAUUSDm,EURUSDm,BTCUSDm` | Symbols streamed from MT5 into the agents and dashboard |
+| `EXNESS_TRADE_SYMBOLS` | `EURUSDm` | Broker symbols allowed to receive demo orders |
+| `EXNESS_ENABLE_DEMO_TRADING` | `false` | Must be `true` before MT5 demo orders are sent |
+| `EXNESS_ALLOW_MIN_VOLUME_ROUND_UP` | `false` | Demo-only option to round tiny risk-sized orders up to broker minimum lot |
+| `EXNESS_MAX_ORDER_VOLUME` | `0.01` | Hard cap on MT5 lot size per demo order |
 
 **News sentiment (optional):**
 By default the Sentiment Agent uses **simulated** news headlines. To have it react to
@@ -122,9 +126,10 @@ engine. Check status via `GET /api/stats` → `sentiment_nlp.real_news`.
 Note: NewsAPI's free tier is limited (~100 requests/day); with 6 polled symbols you may
 hit the daily cap if the process runs continuously all day.
 
-**Exness MT5 demo link (optional, read-only):**
-The Exness adapter connects through the local MetaTrader 5 terminal. It reads account
-status and quotes only; it does not place orders.
+**Exness MT5 demo link (optional):**
+The Exness adapter connects through the local MetaTrader 5 terminal. By default it reads
+account status and quotes only. Demo order execution requires both `TRADING_MODE=exness_demo`
+and `EXNESS_ENABLE_DEMO_TRADING=true`.
 
 ```bash
 cd backend
@@ -139,6 +144,23 @@ POST /api/broker/exness/connect
 GET  /api/broker/exness/account
 GET  /api/broker/exness/quote/XAUUSDm
 ```
+
+To allow demo orders, use a small allowlist and a hard volume cap:
+
+```env
+TRADING_MODE=exness_demo
+EXNESS_ENABLE_DEMO_TRADING=true
+EXNESS_TRADE_SYMBOLS=EURUSDm
+EXNESS_MAX_ORDER_VOLUME=0.01
+EXNESS_ALLOW_MIN_VOLUME_ROUND_UP=true
+```
+
+In Exness demo mode the system:
+- connects MT5 on startup
+- syncs risk/portfolio capital from demo account equity
+- streams configured Exness quotes into the agents
+- sends approved risk-cleared orders through `order_check` and `order_send`
+- rejects non-demo accounts and symbols outside `EXNESS_TRADE_SYMBOLS`
 
 ---
 
@@ -228,7 +250,7 @@ GET  /api/risk            Risk parameters + exposure
 GET  /api/sentiment       NLP sentiment by symbol
 GET  /api/decisions       Orchestrator decision log
 GET  /api/events          Persisted event audit log
-GET  /api/broker/exness   Exness MT5 demo read-only connection status
+GET  /api/broker/exness   Exness MT5 demo connection/status
 GET  /api/broker/exness/account  Sanitized Exness demo account snapshot
 GET  /api/broker/exness/quote/{symbol}  Exness MT5 bid/ask quote
 
@@ -239,7 +261,7 @@ POST /api/controls/risk           Hot-reload risk parameters
 POST /api/controls/watchlist      Add/remove symbols
 POST /api/controls/inject-shock   Stress test: inject price shock
 POST /api/controls/inject-test-signals  Dev-only paired signal injection
-POST /api/broker/exness/connect   Connect read-only Exness MT5 demo adapter
+POST /api/broker/exness/connect   Connect Exness MT5 demo adapter
 POST /api/broker/exness/disconnect  Disconnect Exness MT5 adapter
 ```
 
@@ -260,11 +282,11 @@ Current regression coverage checks:
 - invalid price rejection
 - hard loss threshold kill-switch activation
 - kill-switch blocking in the orchestrator
-- live-mode broker rejection without fake fills
+- live-mode broker rejection without fake fills and broker fill event publishing
 - stop-loss and kill-switch portfolio closure
 - production control-token enforcement
 - persisted audit event reads
-- Exness MT5 adapter status, sanitized account output, and quote reads
+- Exness MT5 adapter status, sanitized account output, quote reads, and demo order handoff
 
 CI is defined in `.github/workflows/ci.yml` and runs backend install, compile, tests,
 frontend install, `npm audit`, and production build.
@@ -298,7 +320,7 @@ frontend install, `npm audit`, and production build.
 ## Disclaimer
 
 ⚠️ **This is for educational and research purposes only.**  
-⚠️ **Paper trading only in default configuration.**  
+⚠️ **Paper trading only in default configuration; Exness execution is demo-account only.**  
 ⚠️ **Not financial advice. Trading involves substantial risk of loss.**  
 ⚠️ **Never deploy to live trading without extensive testing and professional review.**
 
@@ -306,10 +328,11 @@ frontend install, `npm audit`, and production build.
 
 ## Known Limitations
 
-- Paper mode only by default; live broker execution is a stub.
-- Simulated market data only by default; the optional Exness MT5 demo adapter is read-only.
+- Paper mode only by default; Exness execution is limited to MT5 demo accounts.
+- Simulated market data remains available; Exness demo mode can stream configured MT5 quotes into the agents.
 - No full authentication, user authorization, rate limiting, TLS, or production CORS policy.
 - Control endpoints require `CONTROL_TOKEN` in production-like environments, but this is not a replacement for full auth.
 - Risk controls are internal simulation guardrails and still require stress testing before any live use.
 - Technical indicators are simplified simulator outputs, not live-market OHLCV calculations.
 - Exness integration requires a local Windows MT5 terminal and demo credentials in `backend/.env`.
+- Broker minimum lots can exceed the simulator's desired risk size on very small demo balances.

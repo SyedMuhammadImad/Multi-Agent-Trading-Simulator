@@ -58,6 +58,8 @@ logger = logging.getLogger(__name__)
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 CONTROL_TOKEN = os.getenv("CONTROL_TOKEN", "")
 CONTROL_TOKEN_REQUIRED_ENVS = {"production", "prod", "staging"}
+TRADING_MODE_ENV = os.getenv("TRADING_MODE", "paper").strip().lower()
+EXNESS_MARKET_DATA_INTERVAL = float(os.getenv("EXNESS_MARKET_DATA_INTERVAL", "2.0"))
 
 # ─── System singleton ─────────────────────────────────────────────────────────
 class TradingSystem:
@@ -76,6 +78,30 @@ class TradingSystem:
     initialized: bool = False
 
 system = TradingSystem()
+
+
+def _execution_mode_from_env() -> TradingMode:
+    if TRADING_MODE_ENV in {"live", "exness_demo", "demo"}:
+        return TradingMode.LIVE
+    return TradingMode.PAPER
+
+
+def _exness_demo_mode_requested() -> bool:
+    return TRADING_MODE_ENV in {"exness_demo", "demo"} and os.getenv(
+        "EXNESS_ENABLE_DEMO_TRADING", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _normalize_symbol(symbol: str) -> str:
+    cleaned = symbol.strip()
+    if system.exness_broker:
+        resolved = system.exness_broker.resolve_symbol(cleaned)
+        if resolved != cleaned or any(
+            configured.casefold() == cleaned.casefold()
+            for configured in system.exness_broker.config.symbols
+        ):
+            return resolved
+    return cleaned.upper()
 
 
 def require_control_access(x_control_token: Optional[str] = Header(default=None)) -> None:
@@ -101,7 +127,7 @@ async def lifespan(app: FastAPI):
     system.orchestrator = MasterOrchestrator()
     system.strategy_agent = StrategyAgent()
     system.risk_agent = RiskManagementAgent(initial_capital=100_000.0)
-    system.execution_agent = ExecutionAgent(mode=TradingMode.PAPER)
+    system.execution_agent = ExecutionAgent(mode=_execution_mode_from_env())
     system.sentiment_agent = SentimentAgent()
     system.portfolio_manager = PortfolioManagerAgent(initial_capital=100_000.0)
     system.regime_agent = RegimeDetectionAgent()
@@ -110,6 +136,8 @@ async def lifespan(app: FastAPI):
     system.backtest_agent = BacktestingAgent()
     system.learning_agent = LearningAgent(orchestrator=system.orchestrator)
     system.exness_broker = ExnessMT5ReadOnlyBroker()
+    if system.execution_agent.mode == TradingMode.LIVE:
+        system.execution_agent.set_live_broker(system.exness_broker)
 
     # Initialize database
     await init_db()
@@ -134,6 +162,10 @@ async def lifespan(app: FastAPI):
     
     for agent in agents:
         await agent.start()
+
+    if _exness_demo_mode_requested():
+        _configure_exness_agent_inputs()
+        _sync_exness_demo_capital()
 
     # Start event bus and data pipeline concurrently
     bus = get_event_bus()
@@ -177,6 +209,8 @@ async def lifespan(app: FastAPI):
     bus.subscribe(EventType.POSITION_CLOSED, _persist_closed_trade)
 
     system.initialized = True
+    if _exness_demo_mode_requested():
+        asyncio.create_task(_stream_exness_market_data())
     logger.info("✅ Trading system fully initialized — all agents running")
 
     yield  # Application runs here
@@ -490,7 +524,7 @@ async def update_watchlist(request: SymbolWatchlistRequest):
     if not system.strategy_agent:
         raise HTTPException(503, "System not initialized")
     
-    symbol = request.symbol.upper()
+    symbol = _normalize_symbol(request.symbol)
     if request.action == "add":
         system.strategy_agent.add_to_watchlist(symbol)
         system.sentiment_agent.add_symbol(symbol)
@@ -514,7 +548,7 @@ async def inject_price_shock(symbol: str, shock_pct: float):
 @app.post("/api/controls/inject-test-signals", dependencies=[Depends(require_control_access)])
 async def inject_test_signals(request: TestSignalRequest):
     """Stress test: inject agreeing strategy and sentiment signals."""
-    symbol = request.symbol.upper()
+    symbol = _normalize_symbol(request.symbol)
     direction = request.direction.upper()
     if direction not in {"BUY", "SELL"}:
         raise HTTPException(400, "direction must be BUY or SELL")
@@ -634,6 +668,51 @@ async def _get_full_snapshot() -> dict:
         "recent_decisions": system.orchestrator.recent_decisions[:10] if system.orchestrator else [],
         "pipeline_stats": system.data_pipeline.stats if system.data_pipeline else {},
     }
+
+
+def _configure_exness_agent_inputs() -> None:
+    if not system.exness_broker:
+        return
+    for symbol in system.exness_broker.config.symbols:
+        if system.strategy_agent:
+            system.strategy_agent.add_to_watchlist(symbol)
+        if system.sentiment_agent:
+            system.sentiment_agent.add_symbol(symbol)
+
+
+def _sync_exness_demo_capital() -> None:
+    if not system.exness_broker:
+        return
+    account_result = system.exness_broker.account_info()
+    account = account_result.get("account") or {}
+    equity = float(account.get("equity") or account.get("balance") or 0)
+    if equity <= 0:
+        logger.warning("Exness demo capital sync skipped: no positive account equity")
+        return
+    if system.risk_agent:
+        system.risk_agent.update_capital(equity)
+    if system.portfolio_manager:
+        system.portfolio_manager.update_capital(equity)
+    logger.info(f"Exness demo capital synced from broker equity: ${equity:,.2f}")
+
+
+async def _stream_exness_market_data() -> None:
+    if not system.exness_broker:
+        return
+    bus = get_event_bus()
+    while system.initialized:
+        for symbol in system.exness_broker.config.symbols:
+            result = system.exness_broker.market_data_payload(symbol)
+            payload = result.get("payload")
+            if payload:
+                from core.event_bus import Event
+                await bus.publish(Event(
+                    event_type=EventType.MARKET_DATA_UPDATE,
+                    source_agent="exness_mt5",
+                    payload=payload,
+                    priority=4,
+                ))
+        await asyncio.sleep(max(0.5, EXNESS_MARKET_DATA_INTERVAL))
 
 
 if __name__ == "__main__":

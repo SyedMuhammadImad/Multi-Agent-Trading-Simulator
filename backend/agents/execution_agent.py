@@ -10,6 +10,7 @@ If your paper PnL doesn't account for slippage + spread, it's a fantasy.
 """
 
 import asyncio
+import inspect
 import logging
 import random
 import time
@@ -237,30 +238,69 @@ class ExecutionAgent(BaseAgent):
         self._order_history.append(order.to_dict())
 
     async def _live_execute(self, order: Order) -> None:
-        """
-        Live order execution stub.
-        Replace _broker_client with Alpaca/IBKR/Binance SDK.
-        
-        Example Alpaca integration:
-            from alpaca.trading.client import TradingClient
-            from alpaca.trading.requests import MarketOrderRequest
-            
-            client = TradingClient(api_key, secret_key)
-            request = MarketOrderRequest(
-                symbol=order.symbol,
-                qty=order.quantity,
-                side=OrderSide.BUY if order.direction == "BUY" else OrderSide.SELL,
-                time_in_force=TimeInForce.DAY,
-            )
-            result = client.submit_order(request)
-        """
+        """Execute an approved order through an injected broker client."""
         if self._broker_client is None:
             logger.error("Live mode requires broker client. Rejecting order.")
             await self._handle_rejection(order, "Live mode requires broker client")
             return
 
-        # LIVE EXECUTION — implement broker-specific logic here
-        raise NotImplementedError("Set self._broker_client before using live mode")
+        submit = getattr(self._broker_client, "submit_market_order", None)
+        if submit is None:
+            await self._handle_rejection(order, "Broker client does not implement submit_market_order")
+            return
+
+        try:
+            result = submit(order)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as exc:
+            logger.error("Live broker order failed", exc_info=True)
+            await self._handle_rejection(order, f"Live broker exception: {exc}")
+            return
+
+        if not result or not result.get("ok"):
+            reason = result.get("reason") if isinstance(result, dict) else "Live broker rejected order"
+            await self._handle_rejection(order, reason or "Live broker rejected order")
+            return
+
+        order.fill_price = round(float(result["fill_price"]), 6)
+        order.fill_quantity = float(result["fill_quantity"])
+        order.fill_timestamp = time.time()
+        order.slippage_bps = 0.0
+        order.status = OrderStatus.FILLED
+
+        filled_payload = {
+            **order.to_dict(),
+            "broker": result.get("broker"),
+            "broker_symbol": result.get("symbol", order.symbol),
+            "broker_order_id": result.get("broker_order_id"),
+            "broker_deal_id": result.get("broker_deal_id"),
+            "volume_lots": result.get("volume_lots"),
+            "position_size_usd": result.get("position_size_usd", order.fill_quantity * order.fill_price),
+        }
+        logger.info(
+            f"LIVE DEMO FILL: {order.symbol} {order.direction} | "
+            f"broker_symbol={filled_payload['broker_symbol']} | fill={order.fill_price:.6f}"
+        )
+
+        await self.publish(EventType.ORDER_FILLED, filled_payload, priority=2)
+        await self.publish(
+            EventType.POSITION_OPENED,
+            {
+                "symbol": order.symbol,
+                "broker_symbol": filled_payload["broker_symbol"],
+                "direction": order.direction,
+                "entry_price": order.fill_price,
+                "quantity": order.fill_quantity,
+                "stop_loss": order.stop_loss,
+                "take_profit": order.take_profit,
+                "order_id": order.order_id,
+                "broker_order_id": result.get("broker_order_id"),
+                "broker_deal_id": result.get("broker_deal_id"),
+            },
+            priority=3,
+        )
+        self._order_history.append(filled_payload)
 
     def _get_base_spread(self, symbol: str) -> float:
         """Realistic spread estimates by asset class."""
@@ -281,6 +321,25 @@ class ExecutionAgent(BaseAgent):
         
         self._active_orders.clear()
         logger.critical(f"Kill switch: cancelled {cancelled} pending orders")
+
+        if self.mode == TradingMode.LIVE and self._broker_client is not None:
+            close_all = getattr(self._broker_client, "close_all_positions", None)
+            if close_all is not None:
+                result = close_all()
+                if inspect.isawaitable(result):
+                    result = await result
+                for closed in (result or {}).get("closed", []):
+                    if closed.get("ok"):
+                        await self.publish(
+                            EventType.POSITION_CLOSED,
+                            {
+                                "symbol": closed.get("symbol"),
+                                "pnl": closed.get("pnl", 0),
+                                "reason": "kill_switch_broker_close",
+                                "trade": closed,
+                            },
+                            priority=1,
+                        )
         
         await self.publish(
             EventType.ORDER_CANCELLED,

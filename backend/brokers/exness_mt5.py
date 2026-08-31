@@ -8,10 +8,45 @@ terminal logged into an Exness demo account.
 
 from __future__ import annotations
 
+import math
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
+
+
+SUCCESSFUL_CHECK_RETCODES = {0, 10008, 10009, 10010}
+SUCCESSFUL_SEND_RETCODES = {10008, 10009, 10010}
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _parse_symbol_map(raw: str) -> Dict[str, str]:
+    mapping: Dict[str, str] = {}
+    for part in raw.split(","):
+        if ":" not in part:
+            continue
+        source, broker = part.split(":", 1)
+        source = source.strip()
+        broker = broker.strip()
+        if source and broker:
+            mapping[source.casefold()] = broker
+    return mapping
 
 
 def _mask_login(login: Optional[int]) -> Optional[str]:
@@ -44,6 +79,13 @@ class ExnessMT5Config:
     server: str
     terminal_path: str
     symbols: tuple[str, ...]
+    trade_symbols: tuple[str, ...] = ()
+    symbol_map: Dict[str, str] = field(default_factory=dict)
+    enable_demo_trading: bool = False
+    allow_min_volume_round_up: bool = False
+    max_order_volume: float = 0.01
+    deviation_points: int = 20
+    magic: int = 260831
 
     @classmethod
     def from_env(cls) -> "ExnessMT5Config":
@@ -51,12 +93,26 @@ class ExnessMT5Config:
         login = int(raw_login) if raw_login.isdigit() else None
         raw_symbols = os.getenv("EXNESS_SYMBOLS", "XAUUSDm,EURUSDm,BTCUSDm")
         symbols = tuple(s.strip() for s in raw_symbols.split(",") if s.strip())
+        raw_trade_symbols = os.getenv("EXNESS_TRADE_SYMBOLS", "EURUSDm")
+        trade_symbols = tuple(s.strip() for s in raw_trade_symbols.split(",") if s.strip())
+        raw_symbol_map = os.getenv(
+            "EXNESS_SYMBOL_MAP",
+            "BTC-USD:BTCUSDm,ETH-USD:ETHUSDm,EUR-USD:EURUSDm,GBP-USD:GBPUSDm,"
+            "XAUUSD:XAUUSDm,XAUUSDm:XAUUSDm,EURUSDm:EURUSDm,BTCUSDm:BTCUSDm",
+        )
         return cls(
             login=login,
             password=os.getenv("EXNESS_DEMO_PASSWORD", ""),
             server=os.getenv("EXNESS_DEMO_SERVER", ""),
             terminal_path=os.getenv("EXNESS_MT5_PATH", ""),
             symbols=symbols,
+            trade_symbols=trade_symbols,
+            symbol_map=_parse_symbol_map(raw_symbol_map),
+            enable_demo_trading=_env_bool("EXNESS_ENABLE_DEMO_TRADING", False),
+            allow_min_volume_round_up=_env_bool("EXNESS_ALLOW_MIN_VOLUME_ROUND_UP", False),
+            max_order_volume=_env_float("EXNESS_MAX_ORDER_VOLUME", 0.01),
+            deviation_points=int(_env_float("EXNESS_DEVIATION_POINTS", 20)),
+            magic=int(_env_float("EXNESS_MAGIC", 260831)),
         )
 
     @property
@@ -70,6 +126,12 @@ class ExnessMT5Config:
             "server": self.server or None,
             "terminal_path": self.terminal_path or None,
             "symbols": list(self.symbols),
+            "trade_symbols": list(self.trade_symbols),
+            "demo_trading_enabled": self.enable_demo_trading,
+            "allow_min_volume_round_up": self.allow_min_volume_round_up,
+            "max_order_volume": self.max_order_volume,
+            "deviation_points": self.deviation_points,
+            "magic": self.magic,
         }
 
 
@@ -111,9 +173,9 @@ class ExnessMT5ReadOnlyBroker:
 
         return {
             "broker": "exness_mt5",
-            "mode": "read_only_demo",
-            "read_only": True,
-            "trade_execution_enabled": False,
+            "mode": "demo_trading" if self.config.enable_demo_trading else "read_only_demo",
+            "read_only": not (self.config.enable_demo_trading and self._connected),
+            "trade_execution_enabled": self.config.enable_demo_trading and self._connected,
             "configured": self.configured,
             "connected": self._connected,
             "connected_at": self._connected_at,
@@ -172,10 +234,24 @@ class ExnessMT5ReadOnlyBroker:
 
     def _resolve_symbol(self, symbol: str) -> str:
         requested = symbol.strip()
+        mapped = self.config.symbol_map.get(requested.casefold())
+        if mapped:
+            return mapped
         for configured_symbol in self.config.symbols:
             if configured_symbol.casefold() == requested.casefold():
                 return configured_symbol
         return requested
+
+    def resolve_symbol(self, symbol: str) -> str:
+        return self._resolve_symbol(symbol)
+
+    def _is_demo_account(self) -> bool:
+        if self._mt5 is None:
+            return False
+        account = _to_dict(self._mt5.account_info())
+        trade_mode = account.get("trade_mode")
+        demo_mode = getattr(self._mt5, "ACCOUNT_TRADE_MODE_DEMO", 0)
+        return trade_mode == demo_mode
 
     def account_info(self) -> Dict[str, Any]:
         status = self.connect() if not self._connected else self.status()
@@ -229,3 +305,229 @@ class ExnessMT5ReadOnlyBroker:
                 "time_msc": data.get("time_msc"),
             },
         }
+
+    def market_data_payload(self, symbol: str) -> Dict[str, Any]:
+        result = self.quote(symbol)
+        quote = result.get("quote")
+        if not quote:
+            return {"status": result.get("status"), "payload": None}
+
+        bid = float(quote.get("bid") or 0)
+        ask = float(quote.get("ask") or 0)
+        if bid <= 0 or ask <= 0:
+            return {"status": self.status(), "payload": None}
+
+        price = (bid + ask) / 2
+        spread_bps = (ask - bid) / price * 10_000 if price > 0 else 0
+        return {
+            "status": self.status(),
+            "payload": {
+                "symbol": quote["symbol"],
+                "asset_class": "broker",
+                "price": round(price, 6),
+                "bid": round(bid, 6),
+                "ask": round(ask, 6),
+                "volume": 0.0,
+                "timestamp": time.time(),
+                "spread_bps": round(spread_bps, 2),
+                "vix": 20.0,
+            },
+        }
+
+    def submit_market_order(self, order: Any) -> Dict[str, Any]:
+        status = self.connect() if not self._connected else self.status()
+        if not status["connected"]:
+            return {"ok": False, "reason": status.get("last_error") or "broker not connected"}
+        if not self.config.enable_demo_trading:
+            return {"ok": False, "reason": "Set EXNESS_ENABLE_DEMO_TRADING=true to allow demo orders"}
+        if not self._is_demo_account():
+            return {"ok": False, "reason": "Connected account is not an MT5 demo account"}
+
+        symbol = self._resolve_symbol(order.symbol)
+        if self.config.trade_symbols and not any(
+            allowed.casefold() == symbol.casefold() for allowed in self.config.trade_symbols
+        ):
+            return {"ok": False, "reason": f"{symbol} is not enabled in EXNESS_TRADE_SYMBOLS"}
+
+        direction = order.direction.upper()
+        if direction not in {"BUY", "SELL"}:
+            return {"ok": False, "reason": f"unsupported direction {order.direction}"}
+
+        self._mt5.symbol_select(symbol, True)
+        tick = _to_dict(self._mt5.symbol_info_tick(symbol))
+        if not tick:
+            return {"ok": False, "reason": f"missing tick for {symbol}: {self._mt5.last_error()}"}
+
+        raw_price = tick.get("ask") if direction == "BUY" else tick.get("bid")
+        price = float(raw_price or 0)
+        if price <= 0:
+            return {"ok": False, "reason": f"invalid {direction} price for {symbol}"}
+
+        symbol_info = _to_dict(self._mt5.symbol_info(symbol))
+        volume_result = self._volume_for_order(order, symbol_info)
+        if not volume_result["ok"]:
+            return volume_result
+
+        request = self._build_deal_request(
+            symbol=symbol,
+            direction=direction,
+            volume=volume_result["volume"],
+            price=price,
+            stop_loss=order.stop_loss,
+            take_profit=order.take_profit,
+        )
+        check = _to_dict(self._mt5.order_check(request))
+        check_retcode = check.get("retcode")
+        if check_retcode not in SUCCESSFUL_CHECK_RETCODES:
+            return {
+                "ok": False,
+                "reason": f"MT5 order_check failed: {check_retcode} {check.get('comment')}",
+                "request": _sanitize_request(request),
+                "check": check,
+            }
+
+        sent = _to_dict(self._mt5.order_send(request))
+        send_retcode = sent.get("retcode")
+        if send_retcode not in SUCCESSFUL_SEND_RETCODES:
+            return {
+                "ok": False,
+                "reason": f"MT5 order_send failed: {send_retcode} {sent.get('comment')}",
+                "request": _sanitize_request(request),
+                "check": check,
+                "send": sent,
+            }
+
+        fill_price = float(sent.get("price") or price)
+        fill_volume = float(sent.get("volume") or request["volume"])
+        return {
+            "ok": True,
+            "broker": "exness_mt5",
+            "symbol": symbol,
+            "direction": direction,
+            "fill_price": fill_price,
+            "fill_quantity": fill_volume * float(symbol_info.get("trade_contract_size") or 1.0),
+            "volume_lots": fill_volume,
+            "position_size_usd": fill_price * fill_volume * float(symbol_info.get("trade_contract_size") or 1.0),
+            "broker_order_id": sent.get("order"),
+            "broker_deal_id": sent.get("deal"),
+            "retcode": send_retcode,
+            "comment": sent.get("comment"),
+            "request": _sanitize_request(request),
+        }
+
+    def close_all_positions(self) -> Dict[str, Any]:
+        status = self.connect() if not self._connected else self.status()
+        if not status["connected"]:
+            return {"ok": False, "reason": status.get("last_error") or "broker not connected", "closed": []}
+        if not self.config.enable_demo_trading:
+            return {"ok": False, "reason": "demo trading is disabled", "closed": []}
+        if not self._is_demo_account():
+            return {"ok": False, "reason": "connected account is not an MT5 demo account", "closed": []}
+
+        positions = self._mt5.positions_get() or ()
+        closed = []
+        for position in positions:
+            closed.append(self._close_position(position))
+        return {"ok": all(item.get("ok") for item in closed), "closed": closed}
+
+    def _close_position(self, position: Any) -> Dict[str, Any]:
+        data = _to_dict(position)
+        symbol = data.get("symbol")
+        volume = float(data.get("volume") or 0)
+        ticket = data.get("ticket")
+        position_type = data.get("type")
+        if not symbol or volume <= 0 or ticket is None:
+            return {"ok": False, "reason": "invalid broker position", "position": data}
+
+        buy_type = getattr(self._mt5, "POSITION_TYPE_BUY", 0)
+        direction = "SELL" if position_type == buy_type else "BUY"
+        tick = _to_dict(self._mt5.symbol_info_tick(symbol))
+        raw_price = tick.get("bid") if direction == "SELL" else tick.get("ask")
+        price = float(raw_price or 0)
+        if price <= 0:
+            return {"ok": False, "reason": f"invalid close price for {symbol}"}
+
+        request = self._build_deal_request(
+            symbol=symbol,
+            direction=direction,
+            volume=volume,
+            price=price,
+            stop_loss=None,
+            take_profit=None,
+            position=ticket,
+        )
+        sent = _to_dict(self._mt5.order_send(request))
+        send_retcode = sent.get("retcode")
+        return {
+            "ok": send_retcode in SUCCESSFUL_SEND_RETCODES,
+            "symbol": symbol,
+            "ticket": ticket,
+            "volume_lots": volume,
+            "price": float(sent.get("price") or price),
+            "pnl": float(data.get("profit") or 0),
+            "retcode": send_retcode,
+            "comment": sent.get("comment"),
+            "request": _sanitize_request(request),
+        }
+
+    def _build_deal_request(
+        self,
+        *,
+        symbol: str,
+        direction: str,
+        volume: float,
+        price: float,
+        stop_loss: Optional[float],
+        take_profit: Optional[float],
+        position: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        request = {
+            "action": self._mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": volume,
+            "type": self._mt5.ORDER_TYPE_BUY if direction == "BUY" else self._mt5.ORDER_TYPE_SELL,
+            "price": price,
+            "deviation": self.config.deviation_points,
+            "magic": self.config.magic,
+            "comment": "NexusAI demo agent",
+            "type_time": self._mt5.ORDER_TIME_GTC,
+            "type_filling": self._mt5.ORDER_FILLING_IOC,
+        }
+        if position is not None:
+            request["position"] = position
+        if stop_loss and stop_loss > 0:
+            request["sl"] = float(stop_loss)
+        if take_profit and take_profit > 0:
+            request["tp"] = float(take_profit)
+        return request
+
+    def _volume_for_order(self, order: Any, symbol_info: Dict[str, Any]) -> Dict[str, Any]:
+        contract_size = float(symbol_info.get("trade_contract_size") or 1.0)
+        min_volume = float(symbol_info.get("volume_min") or 0.01)
+        max_volume = min(float(symbol_info.get("volume_max") or self.config.max_order_volume), self.config.max_order_volume)
+        volume_step = float(symbol_info.get("volume_step") or 0.01)
+        requested_volume = max(float(order.quantity or 0) / contract_size, 0.0)
+
+        if requested_volume <= 0:
+            return {"ok": False, "reason": "calculated MT5 volume is zero"}
+        if requested_volume < min_volume:
+            if not self.config.allow_min_volume_round_up:
+                return {
+                    "ok": False,
+                    "reason": (
+                        f"calculated volume {requested_volume:.6f} lots is below broker minimum "
+                        f"{min_volume:.6f}; set EXNESS_ALLOW_MIN_VOLUME_ROUND_UP=true for demo-only testing"
+                    ),
+                }
+            requested_volume = min_volume
+
+        capped = min(requested_volume, max_volume)
+        steps = math.floor((capped + 1e-12) / volume_step)
+        volume = round(max(steps * volume_step, min_volume), 8)
+        if volume > max_volume + 1e-12:
+            return {"ok": False, "reason": f"calculated volume {volume:.6f} exceeds max {max_volume:.6f}"}
+        return {"ok": True, "volume": volume}
+
+
+def _sanitize_request(request: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in request.items() if key not in {"password"}}

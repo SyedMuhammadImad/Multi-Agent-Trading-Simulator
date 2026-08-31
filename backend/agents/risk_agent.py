@@ -444,6 +444,11 @@ class RiskManagementAgent(BaseAgent):
         """Manual capital update for paper→live transitions."""
         self.portfolio.total_capital = new_capital
         self.portfolio.available_capital = new_capital - self.portfolio.deployed_capital
+        if not self.portfolio.positions:
+            self.portfolio.peak_capital = new_capital
+            self.portfolio.daily_loss_start = new_capital
+            self.portfolio.daily_pnl = 0.0
+            self.portfolio.total_pnl = 0.0
 
     def deactivate_kill_switch(self) -> None:
         self._kill_switch_active = False

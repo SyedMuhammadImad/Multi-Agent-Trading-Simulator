@@ -457,6 +457,8 @@ function BrokerPanel({ status, setStatus }) {
   const configured = Boolean(status?.configured);
   const connected = Boolean(status?.connected);
   const packageAvailable = Boolean(status?.package_available);
+  const tradeEnabled = Boolean(status?.trade_execution_enabled);
+  const requestedTrading = Boolean(status?.config?.demo_trading_enabled);
   const badgeClass = connected
     ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
     : configured && packageAvailable
@@ -468,7 +470,9 @@ function BrokerPanel({ status, setStatus }) {
       <div className="p-4 space-y-3 font-mono text-xs">
         <div className="flex items-center justify-between">
           <span className="text-zinc-500">Mode</span>
-          <span className="text-cyan-400">READ ONLY DEMO</span>
+          <span className={tradeEnabled ? "text-emerald-400" : "text-cyan-400"}>
+            {tradeEnabled ? "DEMO TRADING" : requestedTrading ? "DEMO ARMED" : "READ ONLY DEMO"}
+          </span>
         </div>
         <div className="flex items-center justify-between">
           <span className="text-zinc-500">Status</span>
@@ -488,6 +492,16 @@ function BrokerPanel({ status, setStatus }) {
             <div className={configured ? "text-emerald-400" : "text-amber-400"}>
               {configured ? "SET" : "MISSING"}
             </div>
+          </div>
+          <div className="bg-zinc-900/50 border border-zinc-800 rounded p-2">
+            <div className="text-zinc-600">Execution</div>
+            <div className={tradeEnabled ? "text-emerald-400" : "text-zinc-500"}>
+              {tradeEnabled ? "ENABLED" : "OFF"}
+            </div>
+          </div>
+          <div className="bg-zinc-900/50 border border-zinc-800 rounded p-2">
+            <div className="text-zinc-600">Max Lot</div>
+            <div className="text-zinc-300">{status?.config?.max_order_volume ?? "--"}</div>
           </div>
         </div>
         <div className="space-y-1 text-[11px] border-t border-zinc-800 pt-3">

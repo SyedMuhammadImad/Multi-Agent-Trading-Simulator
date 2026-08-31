@@ -196,6 +196,10 @@ class PortfolioManagerAgent(BaseAgent):
             price = prices.get(symbol, position.current_price)
             asyncio.create_task(self._close_position(symbol, price, "kill_switch"))
 
+    def update_capital(self, new_capital: float) -> None:
+        self._initial_capital = new_capital
+        self._current_capital = new_capital
+
     @property
     def portfolio_summary(self) -> dict:
         unrealized_pnl = sum(p.unrealized_pnl for p in self._positions.values())

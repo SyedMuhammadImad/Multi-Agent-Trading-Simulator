@@ -100,6 +100,12 @@ git-ignored and should never be committed.
 | `APP_ENV` | `development` | Set `production`, `prod`, or `staging` to require a control token |
 | `CONTROL_TOKEN` | _(unset)_ | Required as `X-Control-Token` for `/api/controls/*` in production-like environments |
 | `NEWS_API_KEY` | _(unset)_ | **NewsAPI.org key for real news sentiment** |
+| `BROKER` | _(unset)_ | Set `exness_mt5` to enable the read-only Exness MT5 demo adapter |
+| `EXNESS_DEMO_LOGIN` | _(unset)_ | Exness MT5 demo account number |
+| `EXNESS_DEMO_PASSWORD` | _(unset)_ | Exness MT5 demo password; never commit this |
+| `EXNESS_DEMO_SERVER` | _(unset)_ | Exness MT5 demo server name |
+| `EXNESS_MT5_PATH` | _(unset)_ | Optional path to `terminal64.exe` |
+| `EXNESS_SYMBOLS` | `XAUUSDm,EURUSDm,BTCUSDm` | Default symbols for the dashboard quote panel |
 
 **News sentiment (optional):**
 By default the Sentiment Agent uses **simulated** news headlines. To have it react to
@@ -115,6 +121,24 @@ TSLA, BTC-USD, ETH-USD, SPY) and scores the real headlines with the built-in VAD
 engine. Check status via `GET /api/stats` → `sentiment_nlp.real_news`.
 Note: NewsAPI's free tier is limited (~100 requests/day); with 6 polled symbols you may
 hit the daily cap if the process runs continuously all day.
+
+**Exness MT5 demo link (optional, read-only):**
+The Exness adapter connects through the local MetaTrader 5 terminal. It reads account
+status and quotes only; it does not place orders.
+
+```bash
+cd backend
+python -m pip install MetaTrader5==5.0.6147
+```
+
+Then set the Exness demo variables in `backend/.env` and restart the backend. Check:
+
+```
+GET  /api/broker/exness
+POST /api/broker/exness/connect
+GET  /api/broker/exness/account
+GET  /api/broker/exness/quote/XAUUSDm
+```
 
 ---
 
@@ -204,6 +228,9 @@ GET  /api/risk            Risk parameters + exposure
 GET  /api/sentiment       NLP sentiment by symbol
 GET  /api/decisions       Orchestrator decision log
 GET  /api/events          Persisted event audit log
+GET  /api/broker/exness   Exness MT5 demo read-only connection status
+GET  /api/broker/exness/account  Sanitized Exness demo account snapshot
+GET  /api/broker/exness/quote/{symbol}  Exness MT5 bid/ask quote
 
 POST /api/controls/agent          Pause/resume any agent
 POST /api/controls/kill-switch    Emergency stop (closes all)
@@ -212,6 +239,8 @@ POST /api/controls/risk           Hot-reload risk parameters
 POST /api/controls/watchlist      Add/remove symbols
 POST /api/controls/inject-shock   Stress test: inject price shock
 POST /api/controls/inject-test-signals  Dev-only paired signal injection
+POST /api/broker/exness/connect   Connect read-only Exness MT5 demo adapter
+POST /api/broker/exness/disconnect  Disconnect Exness MT5 adapter
 ```
 
 Control endpoints are open only in local/development mode. For `APP_ENV=production`,
@@ -235,6 +264,7 @@ Current regression coverage checks:
 - stop-loss and kill-switch portfolio closure
 - production control-token enforcement
 - persisted audit event reads
+- Exness MT5 adapter status, sanitized account output, and quote reads
 
 CI is defined in `.github/workflows/ci.yml` and runs backend install, compile, tests,
 frontend install, `npm audit`, and production build.
@@ -277,8 +307,9 @@ frontend install, `npm audit`, and production build.
 ## Known Limitations
 
 - Paper mode only by default; live broker execution is a stub.
-- Simulated market data only; no real exchange, broker, or data-feed connection is active.
+- Simulated market data only by default; the optional Exness MT5 demo adapter is read-only.
 - No full authentication, user authorization, rate limiting, TLS, or production CORS policy.
 - Control endpoints require `CONTROL_TOKEN` in production-like environments, but this is not a replacement for full auth.
 - Risk controls are internal simulation guardrails and still require stress testing before any live use.
 - Technical indicators are simplified simulator outputs, not live-market OHLCV calculations.
+- Exness integration requires a local Windows MT5 terminal and demo credentials in `backend/.env`.

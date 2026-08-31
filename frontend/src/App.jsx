@@ -417,6 +417,151 @@ function SentimentPanel({ sentiment }) {
   );
 }
 
+// ─── Broker Panel ────────────────────────────────────────────────────────
+function BrokerPanel({ status, setStatus }) {
+  const [account, setAccount] = useState(null);
+  const [quote, setQuote] = useState(null);
+  const [symbol, setSymbol] = useState(status?.config?.symbols?.[0] || "XAUUSDm");
+
+  const refreshStatus = async () => {
+    const next = await apiFetch("/broker/exness");
+    if (next?.broker) setStatus(next);
+    return next;
+  };
+
+  const connect = async () => {
+    const next = await apiFetch("/broker/exness/connect", { method: "POST" });
+    if (next?.broker) setStatus(next);
+  };
+
+  const disconnect = async () => {
+    const next = await apiFetch("/broker/exness/disconnect", { method: "POST" });
+    if (next?.broker) setStatus(next);
+    setAccount(null);
+    setQuote(null);
+  };
+
+  const loadAccount = async () => {
+    const data = await apiFetch("/broker/exness/account");
+    if (data?.status) setStatus(data.status);
+    setAccount(data?.account || null);
+  };
+
+  const loadQuote = async () => {
+    if (!symbol) return;
+    const data = await apiFetch(`/broker/exness/quote/${encodeURIComponent(symbol)}`);
+    if (data?.status) setStatus(data.status);
+    setQuote(data?.quote || null);
+  };
+
+  const configured = Boolean(status?.configured);
+  const connected = Boolean(status?.connected);
+  const packageAvailable = Boolean(status?.package_available);
+  const badgeClass = connected
+    ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+    : configured && packageAvailable
+      ? "text-amber-400 border-amber-500/30 bg-amber-500/10"
+      : "text-zinc-500 border-zinc-700 bg-zinc-900";
+
+  return (
+    <Panel title="Exness Demo Link">
+      <div className="p-4 space-y-3 font-mono text-xs">
+        <div className="flex items-center justify-between">
+          <span className="text-zinc-500">Mode</span>
+          <span className="text-cyan-400">READ ONLY DEMO</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-zinc-500">Status</span>
+          <span className={`px-2 py-0.5 border rounded ${badgeClass}`}>
+            {connected ? "CONNECTED" : configured && packageAvailable ? "READY" : "NOT READY"}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-[11px]">
+          <div className="bg-zinc-900/50 border border-zinc-800 rounded p-2">
+            <div className="text-zinc-600">Package</div>
+            <div className={packageAvailable ? "text-emerald-400" : "text-red-400"}>
+              {packageAvailable ? "INSTALLED" : "MISSING"}
+            </div>
+          </div>
+          <div className="bg-zinc-900/50 border border-zinc-800 rounded p-2">
+            <div className="text-zinc-600">Config</div>
+            <div className={configured ? "text-emerald-400" : "text-amber-400"}>
+              {configured ? "SET" : "MISSING"}
+            </div>
+          </div>
+        </div>
+        <div className="space-y-1 text-[11px] border-t border-zinc-800 pt-3">
+          <div className="flex justify-between gap-3">
+            <span className="text-zinc-600">Login</span>
+            <span className="text-zinc-300 truncate">{status?.config?.login || "--"}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span className="text-zinc-600">Server</span>
+            <span className="text-zinc-300 truncate">{status?.config?.server || "--"}</span>
+          </div>
+        </div>
+        {status?.last_error && (
+          <div className="text-[11px] text-red-300 bg-red-950/30 border border-red-900/50 rounded p-2">
+            {status.last_error}
+          </div>
+        )}
+        <div className="grid grid-cols-3 gap-2">
+          <button onClick={connect} className="py-1.5 bg-cyan-900/30 border border-cyan-500/30 text-cyan-300 rounded hover:bg-cyan-900/50">
+            Connect
+          </button>
+          <button onClick={loadAccount} className="py-1.5 bg-zinc-900 border border-zinc-700 text-zinc-300 rounded hover:bg-zinc-800">
+            Account
+          </button>
+          <button onClick={disconnect} className="py-1.5 bg-zinc-900 border border-zinc-700 text-zinc-400 rounded hover:bg-zinc-800">
+            Disconnect
+          </button>
+        </div>
+        {account && (
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div className="bg-zinc-900/50 border border-zinc-800 rounded p-2">
+              <div className="text-zinc-600">Balance</div>
+              <div className="text-zinc-200">{account.balance ?? "--"} {account.currency || ""}</div>
+            </div>
+            <div className="bg-zinc-900/50 border border-zinc-800 rounded p-2">
+              <div className="text-zinc-600">Equity</div>
+              <div className="text-zinc-200">{account.equity ?? "--"} {account.currency || ""}</div>
+            </div>
+          </div>
+        )}
+        <div className="flex gap-2 border-t border-zinc-800 pt-3">
+          <input
+            value={symbol}
+            onChange={e => setSymbol(e.target.value)}
+            className="min-w-0 flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-300 focus:outline-none focus:border-cyan-500/50"
+          />
+          <button onClick={loadQuote} className="px-3 py-1.5 bg-zinc-900 border border-zinc-700 text-zinc-300 rounded hover:bg-zinc-800">
+            Quote
+          </button>
+          <button onClick={refreshStatus} className="px-3 py-1.5 bg-zinc-900 border border-zinc-700 text-zinc-500 rounded hover:bg-zinc-800">
+            Refresh
+          </button>
+        </div>
+        {quote && (
+          <div className="grid grid-cols-3 gap-2 text-[11px]">
+            <div className="bg-zinc-900/50 border border-zinc-800 rounded p-2">
+              <div className="text-zinc-600">Symbol</div>
+              <div className="text-zinc-200">{quote.symbol}</div>
+            </div>
+            <div className="bg-zinc-900/50 border border-zinc-800 rounded p-2">
+              <div className="text-zinc-600">Bid</div>
+              <div className="text-emerald-400">{quote.bid ?? "--"}</div>
+            </div>
+            <div className="bg-zinc-900/50 border border-zinc-800 rounded p-2">
+              <div className="text-zinc-600">Ask</div>
+              <div className="text-red-400">{quote.ask ?? "--"}</div>
+            </div>
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────
 export default function App() {
   const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
@@ -430,6 +575,7 @@ export default function App() {
   const [regime, setRegime] = useState("UNKNOWN");
   const [equitySpark, setEquitySpark] = useState([]);
   const [killActive, setKillActive] = useState(false);
+  const [exnessStatus, setExnessStatus] = useState(null);
 
   // Hydrate from snapshot
   useEffect(() => {
@@ -441,6 +587,7 @@ export default function App() {
       setKillActive(Boolean(snapshot.risk.kill_switch_active));
     }
     if (snapshot.sentiment) setSentiment(snapshot.sentiment);
+    if (snapshot.broker?.exness) setExnessStatus(snapshot.broker.exness);
     if (snapshot.recent_decisions) setDecisions(snapshot.recent_decisions);
     if (snapshot.regime) setRegime(snapshot.regime);
   }, [snapshot]);
@@ -448,12 +595,13 @@ export default function App() {
   // Poll REST endpoints every 2s for rich data
   useEffect(() => {
     const poll = async () => {
-      const [port, agts, rsk, sent, dec] = await Promise.all([
+      const [port, agts, rsk, sent, dec, broker] = await Promise.all([
         apiFetch("/portfolio"),
         apiFetch("/agents"),
         apiFetch("/risk"),
         apiFetch("/sentiment"),
         apiFetch("/decisions"),
+        apiFetch("/broker/exness"),
       ]);
       if (port?.portfolio) {
         setPortfolio(port.portfolio);
@@ -467,6 +615,7 @@ export default function App() {
       }
       if (sent?.current_sentiment) setSentiment(sent.current_sentiment);
       if (dec?.recent_decisions) setDecisions(dec.recent_decisions);
+      if (broker?.broker) setExnessStatus(broker);
     };
     poll();
     const t = setInterval(poll, 2000);
@@ -591,6 +740,7 @@ export default function App() {
           <div className="space-y-4">
             <RiskDashboard risk={risk} regime={regime} />
             <SentimentPanel sentiment={sentiment} />
+            <BrokerPanel status={exnessStatus} setStatus={setExnessStatus} />
           </div>
         </div>
 

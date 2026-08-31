@@ -51,6 +51,7 @@ from agents.execution_agent import ExecutionAgent, TradingMode
 from agents.sentiment_agent import SentimentAgent
 from agents.portfolio_regime_agents import PortfolioManagerAgent, RegimeDetectionAgent
 from agents.advanced_agents import ComplianceAgent, BacktestingAgent, LearningAgent
+from brokers.exness_mt5 import ExnessMT5ReadOnlyBroker
 from data.pipeline import MarketDataPipeline
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,7 @@ class TradingSystem:
     compliance_agent: Optional[ComplianceAgent] = None
     backtest_agent: Optional[BacktestingAgent] = None
     learning_agent: Optional[LearningAgent] = None
+    exness_broker: Optional[ExnessMT5ReadOnlyBroker] = None
     data_pipeline: Optional[MarketDataPipeline] = None
     initialized: bool = False
 
@@ -107,6 +109,7 @@ async def lifespan(app: FastAPI):
     system.compliance_agent = ComplianceAgent()
     system.backtest_agent = BacktestingAgent()
     system.learning_agent = LearningAgent(orchestrator=system.orchestrator)
+    system.exness_broker = ExnessMT5ReadOnlyBroker()
 
     # Initialize database
     await init_db()
@@ -360,6 +363,41 @@ async def get_decisions():
     }
 
 
+@app.get("/api/broker/exness", dependencies=[Depends(require_control_access)])
+async def get_exness_status():
+    if not system.exness_broker:
+        raise HTTPException(503, "Exness broker adapter not initialized")
+    return system.exness_broker.status()
+
+
+@app.post("/api/broker/exness/connect", dependencies=[Depends(require_control_access)])
+async def connect_exness():
+    if not system.exness_broker:
+        raise HTTPException(503, "Exness broker adapter not initialized")
+    return system.exness_broker.connect()
+
+
+@app.post("/api/broker/exness/disconnect", dependencies=[Depends(require_control_access)])
+async def disconnect_exness():
+    if not system.exness_broker:
+        raise HTTPException(503, "Exness broker adapter not initialized")
+    return system.exness_broker.shutdown()
+
+
+@app.get("/api/broker/exness/account", dependencies=[Depends(require_control_access)])
+async def get_exness_account():
+    if not system.exness_broker:
+        raise HTTPException(503, "Exness broker adapter not initialized")
+    return system.exness_broker.account_info()
+
+
+@app.get("/api/broker/exness/quote/{symbol}", dependencies=[Depends(require_control_access)])
+async def get_exness_quote(symbol: str):
+    if not system.exness_broker:
+        raise HTTPException(503, "Exness broker adapter not initialized")
+    return system.exness_broker.quote(symbol)
+
+
 # ─── Control endpoints ────────────────────────────────────────────────────────
 
 class AgentControlRequest(BaseModel):
@@ -590,6 +628,9 @@ async def _get_full_snapshot() -> dict:
         } if system.risk_agent else {},
         "regime": system.regime_agent.current_regime if system.regime_agent else "UNKNOWN",
         "sentiment": system.sentiment_agent.current_sentiment if system.sentiment_agent else {},
+        "broker": {
+            "exness": system.exness_broker.status() if system.exness_broker else {}
+        },
         "recent_decisions": system.orchestrator.recent_decisions[:10] if system.orchestrator else [],
         "pipeline_stats": system.data_pipeline.stats if system.data_pipeline else {},
     }

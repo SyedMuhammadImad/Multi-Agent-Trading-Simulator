@@ -84,6 +84,7 @@ class ExnessMT5Config:
     enable_demo_trading: bool = False
     allow_min_volume_round_up: bool = False
     max_order_volume: float = 0.01
+    max_order_risk_usd: float = 2.0
     deviation_points: int = 20
     magic: int = 260831
 
@@ -111,6 +112,7 @@ class ExnessMT5Config:
             enable_demo_trading=_env_bool("EXNESS_ENABLE_DEMO_TRADING", False),
             allow_min_volume_round_up=_env_bool("EXNESS_ALLOW_MIN_VOLUME_ROUND_UP", False),
             max_order_volume=_env_float("EXNESS_MAX_ORDER_VOLUME", 0.01),
+            max_order_risk_usd=_env_float("EXNESS_MAX_ORDER_RISK_USD", 2.0),
             deviation_points=int(_env_float("EXNESS_DEVIATION_POINTS", 20)),
             magic=int(_env_float("EXNESS_MAGIC", 260831)),
         )
@@ -130,6 +132,7 @@ class ExnessMT5Config:
             "demo_trading_enabled": self.enable_demo_trading,
             "allow_min_volume_round_up": self.allow_min_volume_round_up,
             "max_order_volume": self.max_order_volume,
+            "max_order_risk_usd": self.max_order_risk_usd,
             "deviation_points": self.deviation_points,
             "magic": self.magic,
         }
@@ -368,6 +371,28 @@ class ExnessMT5ReadOnlyBroker:
         if not volume_result["ok"]:
             return volume_result
 
+        contract_size = float(symbol_info.get("trade_contract_size") or 1.0)
+        fill_quantity = volume_result["volume"] * contract_size
+        notional_usd = price * fill_quantity
+        margin_required = self._calculate_margin(direction, symbol, volume_result["volume"], price)
+        actual_risk_usd = self._actual_risk_usd(direction, price, order.stop_loss, fill_quantity)
+        intended_risk_usd = float(getattr(order, "risk_amount_usd", 0) or 0)
+        max_risk_usd = intended_risk_usd if intended_risk_usd > 0 else self.config.max_order_risk_usd
+        if actual_risk_usd is not None and actual_risk_usd > max_risk_usd + 1e-9:
+            return {
+                "ok": False,
+                "reason": (
+                    f"broker minimum volume risk ${actual_risk_usd:.2f} exceeds approved "
+                    f"risk ${max_risk_usd:.2f}"
+                ),
+                "symbol": symbol,
+                "volume_lots": volume_result["volume"],
+                "fill_quantity": fill_quantity,
+                "notional_usd": notional_usd,
+                "margin_required": margin_required,
+                "actual_risk_usd": actual_risk_usd,
+            }
+
         request = self._build_deal_request(
             symbol=symbol,
             direction=direction,
@@ -399,15 +424,22 @@ class ExnessMT5ReadOnlyBroker:
 
         fill_price = float(sent.get("price") or price)
         fill_volume = float(sent.get("volume") or request["volume"])
+        filled_quantity = fill_volume * contract_size
+        filled_notional = fill_price * filled_quantity
+        filled_margin = self._calculate_margin(direction, symbol, fill_volume, fill_price)
+        filled_risk = self._actual_risk_usd(direction, fill_price, order.stop_loss, filled_quantity)
         return {
             "ok": True,
             "broker": "exness_mt5",
             "symbol": symbol,
             "direction": direction,
             "fill_price": fill_price,
-            "fill_quantity": fill_volume * float(symbol_info.get("trade_contract_size") or 1.0),
+            "fill_quantity": filled_quantity,
             "volume_lots": fill_volume,
-            "position_size_usd": fill_price * fill_volume * float(symbol_info.get("trade_contract_size") or 1.0),
+            "position_size_usd": filled_margin if filled_margin is not None else filled_notional,
+            "notional_usd": filled_notional,
+            "margin_required": filled_margin,
+            "actual_risk_usd": filled_risk,
             "broker_order_id": sent.get("order"),
             "broker_deal_id": sent.get("deal"),
             "retcode": send_retcode,
@@ -527,6 +559,26 @@ class ExnessMT5ReadOnlyBroker:
         if volume > max_volume + 1e-12:
             return {"ok": False, "reason": f"calculated volume {volume:.6f} exceeds max {max_volume:.6f}"}
         return {"ok": True, "volume": volume}
+
+    def _calculate_margin(self, direction: str, symbol: str, volume: float, price: float) -> Optional[float]:
+        order_type = self._mt5.ORDER_TYPE_BUY if direction == "BUY" else self._mt5.ORDER_TYPE_SELL
+        margin = self._mt5.order_calc_margin(order_type, symbol, volume, price)
+        return round(float(margin), 2) if margin is not None else None
+
+    def _actual_risk_usd(
+        self,
+        direction: str,
+        price: float,
+        stop_loss: Optional[float],
+        fill_quantity: float,
+    ) -> Optional[float]:
+        if not stop_loss or stop_loss <= 0:
+            return None
+        if direction == "BUY" and stop_loss >= price:
+            return None
+        if direction == "SELL" and stop_loss <= price:
+            return None
+        return abs(price - float(stop_loss)) * fill_quantity
 
 
 def _sanitize_request(request: Dict[str, Any]) -> Dict[str, Any]:

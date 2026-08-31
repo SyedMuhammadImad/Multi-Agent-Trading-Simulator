@@ -170,6 +170,9 @@ def test_exness_demo_order_uses_order_check_and_order_send():
             self.sent = request.copy()
             return Result(retcode=10009, comment="Done", order=11, deal=22, price=request["price"], volume=request["volume"])
 
+        def order_calc_margin(self, order_type, symbol, volume, price):
+            return 0.58
+
         def last_error(self):
             return (0, "OK")
 
@@ -197,6 +200,7 @@ def test_exness_demo_order_uses_order_check_and_order_send():
         quantity=0.001,
         stop_loss=2200.0,
         take_profit=2400.0,
+        risk_amount_usd=200.0,
     )
 
     result = broker.submit_market_order(order)
@@ -206,7 +210,75 @@ def test_exness_demo_order_uses_order_check_and_order_send():
     assert fake.sent["volume"] == 0.01
     assert result["fill_price"] == 2301.55
     assert result["fill_quantity"] == 1.0
-    assert result["position_size_usd"] == 2301.55
+    assert result["notional_usd"] == 2301.55
+    assert result["margin_required"] == 0.58
+    assert result["position_size_usd"] == 0.58
+
+
+def test_exness_demo_order_rejects_when_min_lot_exceeds_approved_risk():
+    Tick = namedtuple("Tick", "bid ask last time time_msc")
+    Info = namedtuple("Info", "trade_contract_size volume_min volume_max volume_step")
+    Account = namedtuple("Account", "login trade_mode")
+
+    class FakeMT5:
+        TRADE_ACTION_DEAL = 1
+        ORDER_TYPE_BUY = 0
+        ORDER_TYPE_SELL = 1
+        ORDER_TIME_GTC = 0
+        ORDER_FILLING_IOC = 1
+        ACCOUNT_TRADE_MODE_DEMO = 0
+
+        def initialize(self, **kwargs):
+            return True
+
+        def account_info(self):
+            return Account(login=12345678, trade_mode=0)
+
+        def symbol_select(self, symbol, enabled):
+            return True
+
+        def symbol_info_tick(self, symbol):
+            return Tick(bid=1.15989, ask=1.15997, last=0.0, time=1, time_msc=1000)
+
+        def symbol_info(self, symbol):
+            return Info(trade_contract_size=100000.0, volume_min=0.01, volume_max=50.0, volume_step=0.01)
+
+        def order_calc_margin(self, order_type, symbol, volume, price):
+            return 0.58
+
+        def last_error(self):
+            return (0, "OK")
+
+    config = ExnessMT5Config(
+        login=12345678,
+        password="secret-password",
+        server="Exness-MT5Trial",
+        terminal_path="",
+        symbols=("EURUSDm",),
+        symbol_map={},
+        enable_demo_trading=True,
+        allow_min_volume_round_up=True,
+        max_order_volume=0.01,
+        max_order_risk_usd=2.0,
+        deviation_points=20,
+        magic=260831,
+    )
+    broker = ExnessMT5ReadOnlyBroker(config=config, mt5_module=FakeMT5())
+    order = SimpleNamespace(
+        symbol="EURUSDm",
+        direction="BUY",
+        quantity=4.31,
+        stop_loss=1.1251,
+        take_profit=1.2121,
+        risk_amount_usd=2.0,
+    )
+
+    result = broker.submit_market_order(order)
+
+    assert result["ok"] is False
+    assert "exceeds approved risk" in result["reason"]
+    assert result["volume_lots"] == 0.01
+    assert round(result["actual_risk_usd"], 2) > 2.0
 
 
 def test_exness_order_rejects_when_demo_trading_disabled():

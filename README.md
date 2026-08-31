@@ -110,6 +110,7 @@ git-ignored and should never be committed.
 | `EXNESS_ENABLE_DEMO_TRADING` | `false` | Must be `true` before MT5 demo orders are sent |
 | `EXNESS_ALLOW_MIN_VOLUME_ROUND_UP` | `false` | Demo-only option to round tiny risk-sized orders up to broker minimum lot |
 | `EXNESS_MAX_ORDER_VOLUME` | `0.01` | Hard cap on MT5 lot size per demo order |
+| `EXNESS_MAX_ORDER_RISK_USD` | `2.0` | Hard cap on estimated stop-loss risk after broker lot rounding |
 
 **News sentiment (optional):**
 By default the Sentiment Agent uses **simulated** news headlines. To have it react to
@@ -152,6 +153,7 @@ TRADING_MODE=exness_demo
 EXNESS_ENABLE_DEMO_TRADING=true
 EXNESS_TRADE_SYMBOLS=EURUSDm
 EXNESS_MAX_ORDER_VOLUME=0.01
+EXNESS_MAX_ORDER_RISK_USD=2.0
 EXNESS_ALLOW_MIN_VOLUME_ROUND_UP=true
 ```
 
@@ -161,6 +163,7 @@ In Exness demo mode the system:
 - streams configured Exness quotes into the agents
 - sends approved risk-cleared orders through `order_check` and `order_send`
 - rejects non-demo accounts and symbols outside `EXNESS_TRADE_SYMBOLS`
+- rejects broker-minimum lot rounding if it exceeds the approved stop-loss risk
 
 ---
 

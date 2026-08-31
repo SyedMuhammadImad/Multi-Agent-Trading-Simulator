@@ -59,6 +59,7 @@ class Order:
     stop_price: Optional[float]
     stop_loss: Optional[float]
     take_profit: Optional[float]
+    risk_amount_usd: Optional[float] = None
     status: OrderStatus = OrderStatus.PENDING
     fill_price: Optional[float] = None
     fill_quantity: Optional[float] = None
@@ -77,6 +78,7 @@ class Order:
             "limit_price": self.limit_price,
             "stop_loss": self.stop_loss,
             "take_profit": self.take_profit,
+            "risk_amount_usd": self.risk_amount_usd,
             "status": self.status.value,
             "fill_price": self.fill_price,
             "fill_quantity": self.fill_quantity,
@@ -147,6 +149,7 @@ class ExecutionAgent(BaseAgent):
             stop_price=None,
             stop_loss=sizing["stop_loss"],
             take_profit=sizing["take_profit"],
+            risk_amount_usd=sizing.get("risk_amount_usd"),
             source_decision=original.get("orchestrator_decision"),
         )
 
@@ -269,6 +272,10 @@ class ExecutionAgent(BaseAgent):
         order.slippage_bps = 0.0
         order.status = OrderStatus.FILLED
 
+        deployed_capital = result.get("margin_required")
+        if deployed_capital is None:
+            deployed_capital = result.get("position_size_usd", order.fill_quantity * order.fill_price)
+
         filled_payload = {
             **order.to_dict(),
             "broker": result.get("broker"),
@@ -276,7 +283,10 @@ class ExecutionAgent(BaseAgent):
             "broker_order_id": result.get("broker_order_id"),
             "broker_deal_id": result.get("broker_deal_id"),
             "volume_lots": result.get("volume_lots"),
-            "position_size_usd": result.get("position_size_usd", order.fill_quantity * order.fill_price),
+            "margin_required": result.get("margin_required"),
+            "notional_usd": result.get("notional_usd"),
+            "actual_risk_usd": result.get("actual_risk_usd"),
+            "position_size_usd": deployed_capital,
         }
         logger.info(
             f"LIVE DEMO FILL: {order.symbol} {order.direction} | "

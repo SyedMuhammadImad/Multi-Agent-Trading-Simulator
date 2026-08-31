@@ -107,7 +107,7 @@ git-ignored and should never be committed.
 | `EXNESS_DEMO_SERVER` | _(unset)_ | Exness MT5 demo server name |
 | `EXNESS_MT5_PATH` | _(unset)_ | Optional path to `terminal64.exe` |
 | `EXNESS_SYMBOLS` | `XAUUSDm,EURUSDm,BTCUSDm,USOILm` | Symbols streamed from MT5 into the agents and dashboard |
-| `EXNESS_TRADE_SYMBOLS` | `EURUSDm` | Broker symbols allowed to receive demo orders |
+| `EXNESS_TRADE_SYMBOLS` | `EURUSDm,USOILm` | Broker symbols allowed to receive demo orders |
 | `EXNESS_ENABLE_DEMO_TRADING` | `false` | Must be `true` before MT5 demo orders are sent |
 | `EXNESS_ALLOW_MIN_VOLUME_ROUND_UP` | `false` | Demo-only option to round tiny risk-sized orders up to broker minimum lot |
 | `EXNESS_MAX_ORDER_VOLUME` | `0.01` | Hard cap on MT5 lot size per demo order |
@@ -152,7 +152,7 @@ To allow demo orders, use a small allowlist and a hard volume cap:
 ```env
 TRADING_MODE=exness_demo
 EXNESS_ENABLE_DEMO_TRADING=true
-EXNESS_TRADE_SYMBOLS=EURUSDm
+EXNESS_TRADE_SYMBOLS=EURUSDm,USOILm
 EXNESS_MAX_ORDER_VOLUME=0.01
 EXNESS_MAX_ORDER_RISK_USD=2.0
 EXNESS_ALLOW_MIN_VOLUME_ROUND_UP=true
@@ -163,7 +163,7 @@ In Exness demo mode the system:
 - syncs risk/portfolio capital from demo account equity
 - streams configured Exness quotes into the agents
 - lets the Sentiment Agent emit broker-symbol news signals for `EURUSDm`, `USOILm`, `XAUUSDm`, and `BTCUSDm`
-- adds a Broker Momentum Confirmation Agent for Exness trade-allowed symbols
+- adds a Broker Momentum Confirmation Agent for configured Exness feed symbols
 - sends approved risk-cleared orders through `order_check` and `order_send`
 - rejects non-demo accounts and symbols outside `EXNESS_TRADE_SYMBOLS`
 - rejects broker-minimum lot rounding if it exceeds the approved stop-loss risk

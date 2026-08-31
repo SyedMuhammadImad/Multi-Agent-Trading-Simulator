@@ -94,7 +94,7 @@ class ExnessMT5Config:
         login = int(raw_login) if raw_login.isdigit() else None
         raw_symbols = os.getenv("EXNESS_SYMBOLS", "XAUUSDm,EURUSDm,BTCUSDm,USOILm")
         symbols = tuple(s.strip() for s in raw_symbols.split(",") if s.strip())
-        raw_trade_symbols = os.getenv("EXNESS_TRADE_SYMBOLS", "EURUSDm")
+        raw_trade_symbols = os.getenv("EXNESS_TRADE_SYMBOLS", "EURUSDm,USOILm")
         trade_symbols = tuple(s.strip() for s in raw_trade_symbols.split(",") if s.strip())
         raw_symbol_map = os.getenv(
             "EXNESS_SYMBOL_MAP",

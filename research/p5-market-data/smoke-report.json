@@ -1,0 +1,498 @@
+{
+  "start": "2021-01-04T12:00:00+00:00",
+  "end": "2021-01-04T20:00:00+00:00",
+  "datasets": [
+    {
+      "dataset_id": "0a6d9c2913d25ff05fd5522473719805e268660f896bc5ff567531f20f46ab1b",
+      "manifest": {
+        "bar_count": 480,
+        "content_hash": "401594f788e0bafc76850886f7e48ecc1cb428e407f8fbf0fceb0b9ab4c67284",
+        "end": "2021-01-04T20:00:00+00:00",
+        "gaps": [],
+        "instrument": "XAUUSD",
+        "issues": [
+          {
+            "at": "2021-01-04T14:06:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T14:36:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T16:49:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T18:26:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T19:14:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T19:26:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          }
+        ],
+        "mapping": {
+          "basis": "HistData bid gold/USD; broker equivalence unproven",
+          "broker_symbol": "XAUUSDm",
+          "provider_symbol": "XAUUSD"
+        },
+        "mapping_version": "histdata-v1",
+        "normalization": "p5-data-v1",
+        "provider": "HISTDATA",
+        "real_data": true,
+        "resampling": "UTC-epoch-left-closed-complete-only-v1",
+        "source_timeframe": "1M",
+        "start": "2021-01-04T12:00:00+00:00",
+        "status": "REVIEW_REQUIRED",
+        "timeframe": "1M",
+        "validation": "strict-shape-completeness-discontinuity-v3",
+        "version": "p5-data-v1"
+      },
+      "replay": true,
+      "restart": true,
+      "research_query_accepted": false
+    },
+    {
+      "dataset_id": "ccb44d9a8cfd370eb912b872543c2cb773342d3a76565897026b6b7bcc3397d6",
+      "manifest": {
+        "bar_count": 8,
+        "content_hash": "03abf154c47c26bf9f48668b310a5cb2a812ddf1f114b615f23ea079b34b3242",
+        "end": "2021-01-04T20:00:00+00:00",
+        "gaps": [],
+        "instrument": "XAUUSD",
+        "issues": [
+          {
+            "at": "2021-01-04T14:06:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T14:36:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T16:49:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T18:26:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T19:14:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T19:26:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          }
+        ],
+        "mapping": {
+          "basis": "HistData bid gold/USD; broker equivalence unproven",
+          "broker_symbol": "XAUUSDm",
+          "provider_symbol": "XAUUSD"
+        },
+        "mapping_version": "histdata-v1",
+        "normalization": "p5-data-v1",
+        "provider": "HISTDATA",
+        "real_data": true,
+        "resampling": "UTC-epoch-left-closed-complete-only-v1",
+        "source_timeframe": "1M",
+        "start": "2021-01-04T12:00:00+00:00",
+        "status": "REVIEW_REQUIRED",
+        "timeframe": "1H",
+        "validation": "strict-shape-completeness-discontinuity-v3",
+        "version": "p5-data-v1"
+      },
+      "replay": true,
+      "restart": true,
+      "research_query_accepted": false
+    },
+    {
+      "dataset_id": "8d8f0474381f7816b8e68c3b7e6a782195f526f3c16781acf62d1d3fce3191d2",
+      "manifest": {
+        "bar_count": 2,
+        "content_hash": "4e5526a1142c0cad88086da3534f9fcd64ea1060fe7f0225e0c6d4066376e78f",
+        "end": "2021-01-04T20:00:00+00:00",
+        "gaps": [],
+        "instrument": "XAUUSD",
+        "issues": [
+          {
+            "at": "2021-01-04T14:06:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T14:36:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T16:49:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T18:26:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T19:14:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T19:26:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          }
+        ],
+        "mapping": {
+          "basis": "HistData bid gold/USD; broker equivalence unproven",
+          "broker_symbol": "XAUUSDm",
+          "provider_symbol": "XAUUSD"
+        },
+        "mapping_version": "histdata-v1",
+        "normalization": "p5-data-v1",
+        "provider": "HISTDATA",
+        "real_data": true,
+        "resampling": "UTC-epoch-left-closed-complete-only-v1",
+        "source_timeframe": "1M",
+        "start": "2021-01-04T12:00:00+00:00",
+        "status": "REVIEW_REQUIRED",
+        "timeframe": "4H",
+        "validation": "strict-shape-completeness-discontinuity-v3",
+        "version": "p5-data-v1"
+      },
+      "replay": true,
+      "restart": true,
+      "research_query_accepted": false
+    },
+    {
+      "dataset_id": "2857acef7541aa99dacdcace2bc15d981aef01c498f0821604d1237f62ffa281",
+      "manifest": {
+        "bar_count": 480,
+        "content_hash": "a705fffe15b6a8d6307bb62fc46782db98a740836ad4723c85c6c7e820f331a8",
+        "end": "2021-01-04T20:00:00+00:00",
+        "gaps": [],
+        "instrument": "XAGUSD",
+        "issues": [
+          {
+            "at": "2021-01-04T12:10:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T19:09:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T19:14:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          }
+        ],
+        "mapping": {
+          "basis": "HistData bid silver/USD; broker equivalence unproven",
+          "broker_symbol": "XAGUSDm",
+          "provider_symbol": "XAGUSD"
+        },
+        "mapping_version": "histdata-v1",
+        "normalization": "p5-data-v1",
+        "provider": "HISTDATA",
+        "real_data": true,
+        "resampling": "UTC-epoch-left-closed-complete-only-v1",
+        "source_timeframe": "1M",
+        "start": "2021-01-04T12:00:00+00:00",
+        "status": "REVIEW_REQUIRED",
+        "timeframe": "1M",
+        "validation": "strict-shape-completeness-discontinuity-v3",
+        "version": "p5-data-v1"
+      },
+      "replay": true,
+      "restart": true,
+      "research_query_accepted": false
+    },
+    {
+      "dataset_id": "6149ac24c2c891d46d3e319f2bc755ea22cb344614798f9bbd92ac986bf57725",
+      "manifest": {
+        "bar_count": 8,
+        "content_hash": "467fa0844e5c4fabcf3ed7cf917e4ec007305fc8104468945dd5124d528e8b66",
+        "end": "2021-01-04T20:00:00+00:00",
+        "gaps": [],
+        "instrument": "XAGUSD",
+        "issues": [
+          {
+            "at": "2021-01-04T12:10:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T19:09:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T19:14:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          }
+        ],
+        "mapping": {
+          "basis": "HistData bid silver/USD; broker equivalence unproven",
+          "broker_symbol": "XAGUSDm",
+          "provider_symbol": "XAGUSD"
+        },
+        "mapping_version": "histdata-v1",
+        "normalization": "p5-data-v1",
+        "provider": "HISTDATA",
+        "real_data": true,
+        "resampling": "UTC-epoch-left-closed-complete-only-v1",
+        "source_timeframe": "1M",
+        "start": "2021-01-04T12:00:00+00:00",
+        "status": "REVIEW_REQUIRED",
+        "timeframe": "1H",
+        "validation": "strict-shape-completeness-discontinuity-v3",
+        "version": "p5-data-v1"
+      },
+      "replay": true,
+      "restart": true,
+      "research_query_accepted": false
+    },
+    {
+      "dataset_id": "5a0e248586861761719bd4301e1de05ded5e8055ce24a54f1ff93a720e9ffab2",
+      "manifest": {
+        "bar_count": 2,
+        "content_hash": "c65425d15de4ae1fcef98c305e511e838bcc0a868ed74846bf506ef9d5a5801e",
+        "end": "2021-01-04T20:00:00+00:00",
+        "gaps": [],
+        "instrument": "XAGUSD",
+        "issues": [
+          {
+            "at": "2021-01-04T12:10:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T19:09:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T19:14:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          }
+        ],
+        "mapping": {
+          "basis": "HistData bid silver/USD; broker equivalence unproven",
+          "broker_symbol": "XAGUSDm",
+          "provider_symbol": "XAGUSD"
+        },
+        "mapping_version": "histdata-v1",
+        "normalization": "p5-data-v1",
+        "provider": "HISTDATA",
+        "real_data": true,
+        "resampling": "UTC-epoch-left-closed-complete-only-v1",
+        "source_timeframe": "1M",
+        "start": "2021-01-04T12:00:00+00:00",
+        "status": "REVIEW_REQUIRED",
+        "timeframe": "4H",
+        "validation": "strict-shape-completeness-discontinuity-v3",
+        "version": "p5-data-v1"
+      },
+      "replay": true,
+      "restart": true,
+      "research_query_accepted": false
+    },
+    {
+      "dataset_id": "a81094063960d7eab6efe4913df7309af1bbd5ac9a694ad169e82c0959e5971c",
+      "manifest": {
+        "bar_count": 480,
+        "content_hash": "8fc251cc0ce2b9a2efa38cf9b043b6fb3a924eb6765e114897040e994ff40580",
+        "end": "2021-01-04T20:00:00+00:00",
+        "gaps": [],
+        "instrument": "USOIL",
+        "issues": [
+          {
+            "at": "2021-01-04T12:05:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T14:43:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T15:37:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T16:41:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T16:48:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T17:48:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T17:54:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          }
+        ],
+        "mapping": {
+          "basis": "HistData WTI/USD; contract/roll and broker basis unverified",
+          "broker_symbol": "USOILm",
+          "provider_symbol": "WTIUSD"
+        },
+        "mapping_version": "histdata-v1",
+        "normalization": "p5-data-v1",
+        "provider": "HISTDATA",
+        "real_data": true,
+        "resampling": "UTC-epoch-left-closed-complete-only-v1",
+        "source_timeframe": "1M",
+        "start": "2021-01-04T12:00:00+00:00",
+        "status": "REVIEW_REQUIRED",
+        "timeframe": "1M",
+        "validation": "strict-shape-completeness-discontinuity-v3",
+        "version": "p5-data-v1"
+      },
+      "replay": true,
+      "restart": true,
+      "research_query_accepted": false
+    },
+    {
+      "dataset_id": "fc47e161bd9ae334c2b0364a6376e208052786660a286bd7915232ea24924b60",
+      "manifest": {
+        "bar_count": 8,
+        "content_hash": "bf3eb19cd04eb907078b843c32fe81073c1bc64185f759b2460b4738e6dde272",
+        "end": "2021-01-04T20:00:00+00:00",
+        "gaps": [],
+        "instrument": "USOIL",
+        "issues": [
+          {
+            "at": "2021-01-04T12:05:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T14:43:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T15:37:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T16:41:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T16:48:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T17:48:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T17:54:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          }
+        ],
+        "mapping": {
+          "basis": "HistData WTI/USD; contract/roll and broker basis unverified",
+          "broker_symbol": "USOILm",
+          "provider_symbol": "WTIUSD"
+        },
+        "mapping_version": "histdata-v1",
+        "normalization": "p5-data-v1",
+        "provider": "HISTDATA",
+        "real_data": true,
+        "resampling": "UTC-epoch-left-closed-complete-only-v1",
+        "source_timeframe": "1M",
+        "start": "2021-01-04T12:00:00+00:00",
+        "status": "REVIEW_REQUIRED",
+        "timeframe": "1H",
+        "validation": "strict-shape-completeness-discontinuity-v3",
+        "version": "p5-data-v1"
+      },
+      "replay": true,
+      "restart": true,
+      "research_query_accepted": false
+    },
+    {
+      "dataset_id": "47982817e5a76a634b3a1d1e38cc50e923f0038844d9e3babac92f5cba92ab91",
+      "manifest": {
+        "bar_count": 2,
+        "content_hash": "682d85d867fb834948abfb2b154e620916ccaa980ec2ac8bd753ac3075b5c4f9",
+        "end": "2021-01-04T20:00:00+00:00",
+        "gaps": [],
+        "instrument": "USOIL",
+        "issues": [
+          {
+            "at": "2021-01-04T12:05:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T14:43:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T15:37:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T16:41:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T16:48:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T17:48:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          },
+          {
+            "at": "2021-01-04T17:54:00+00:00",
+            "kind": "DISJOINT_ADJACENT_PRICE_RANGES"
+          }
+        ],
+        "mapping": {
+          "basis": "HistData WTI/USD; contract/roll and broker basis unverified",
+          "broker_symbol": "USOILm",
+          "provider_symbol": "WTIUSD"
+        },
+        "mapping_version": "histdata-v1",
+        "normalization": "p5-data-v1",
+        "provider": "HISTDATA",
+        "real_data": true,
+        "resampling": "UTC-epoch-left-closed-complete-only-v1",
+        "source_timeframe": "1M",
+        "start": "2021-01-04T12:00:00+00:00",
+        "status": "REVIEW_REQUIRED",
+        "timeframe": "4H",
+        "validation": "strict-shape-completeness-discontinuity-v3",
+        "version": "p5-data-v1"
+      },
+      "replay": true,
+      "restart": true,
+      "research_query_accepted": false
+    }
+  ],
+  "downloads": [
+    {
+      "instrument": "XAUUSD",
+      "month": "2021-01",
+      "bytes": 4252073,
+      "sha256": "312229c9db5b39138c41b1e488d00ed32e158a0d1fc3f23a225b223c3271c0a4"
+    },
+    {
+      "instrument": "XAGUSD",
+      "month": "2021-01",
+      "bytes": 3248260,
+      "sha256": "7ccccc89c592339ce3ca7712c1ee3758bd15fe6cbc398ef8473a3fbf840d97a3"
+    },
+    {
+      "instrument": "USOIL",
+      "month": "2021-01",
+      "bytes": 3134351,
+      "sha256": "d808a19ff0129ced92ca0de1d6c67dc073f271abee520338a7956ef39814e29d"
+    }
+  ],
+  "broker_actions": 0
+}

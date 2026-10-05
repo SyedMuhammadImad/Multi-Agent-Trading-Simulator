@@ -26,6 +26,8 @@ class EventType(str, Enum):
     SENTIMENT_SIGNAL = "sentiment.signal"
     ARBITRAGE_SIGNAL = "arbitrage.signal"
     MACRO_SIGNAL = "macro.signal"
+    TRADE_SIGNAL_ACCEPTED = "trade_signal.accepted"
+    TRADE_SIGNAL_REJECTED = "trade_signal.rejected"
     
     # Risk events
     RISK_ASSESSMENT = "risk.assessment"
@@ -43,10 +45,12 @@ class EventType(str, Enum):
     PORTFOLIO_UPDATE = "portfolio.update"
     POSITION_OPENED = "position.opened"
     POSITION_CLOSED = "position.closed"
+    POSITION_MODIFIED = "position.modified"
     
     # Compliance events
     COMPLIANCE_CHECK = "compliance.check"
     COMPLIANCE_VIOLATION = "compliance.violation"
+    RECONCILIATION_ERROR = "reconciliation.error"
     
     # System events
     AGENT_STATUS = "system.agent_status"
@@ -56,6 +60,8 @@ class EventType(str, Enum):
     # Learning events
     PERFORMANCE_UPDATE = "learning.performance_update"
     WEIGHT_UPDATE = "learning.weight_update"
+    TRADER_LEARNING_SNAPSHOT = "learning.trader_snapshot"
+    TRADER_SHADOW_PREDICTION = "learning.trader_shadow_prediction"
 
 
 @dataclass

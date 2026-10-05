@@ -5,17 +5,18 @@ from core import database
 from core.database import get_event_history, init_db, save_event
 
 
-def test_control_access_allows_development_without_token(monkeypatch):
-    import main
+def test_retired_control_access_rejects_development_without_token(monkeypatch):
+    import legacy_application as main
 
     monkeypatch.setattr(main, "APP_ENV", "development")
     monkeypatch.setattr(main, "CONTROL_TOKEN", "")
 
-    main.require_control_access()
+    with pytest.raises(HTTPException):
+        main.require_control_access(x_control_token="")
 
 
 def test_control_access_requires_matching_token_in_production(monkeypatch):
-    import main
+    import legacy_application as main
 
     monkeypatch.setattr(main, "APP_ENV", "production")
     monkeypatch.setattr(main, "CONTROL_TOKEN", "secret")

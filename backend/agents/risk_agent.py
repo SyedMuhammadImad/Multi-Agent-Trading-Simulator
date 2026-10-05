@@ -203,8 +203,10 @@ class RiskManagementAgent(BaseAgent):
                 {
                     "symbol": symbol,
                     "action": action,
+                    "signal_id": payload.get("signal_id") or payload.get("source_signal_id"),
                     "rejected": True,
                     "reasons": reasons,
+                    "original_request": payload,
                     "portfolio": self.portfolio.to_dict(),
                 },
                 priority=2,
@@ -214,9 +216,9 @@ class RiskManagementAgent(BaseAgent):
         # ─── Position sizing ─────────────────────────────────────────────────
         price = float(payload.get("price", 0) or 0)
         if price <= 0:
-            logger.error(
-                f"ORDER REJECTED: {symbol} {action} — invalid order price {price!r}"
-            )
+            reason = f"Invalid order price {price!r}"
+            logger.error(f"ORDER REJECTED: {symbol} {action} — {reason}")
+            await self._reject_order_request(symbol, action, [reason], payload)
             return
 
         indicators = payload.get("indicators", {}) or {}
@@ -224,19 +226,48 @@ class RiskManagementAgent(BaseAgent):
         if atr <= 0:
             atr = price * 0.015  # Conservative fallback when no observed ATR exists
 
-        sizing = self._calculate_position_size(
-            symbol=symbol,
-            direction="BUY" if "BUY" in action else "SELL",
-            entry_price=price,
-            atr=atr,
-            confidence=confidence,
-        )
+        direction = "BUY" if "BUY" in action else "SELL"
+        requested_risk_pct = payload.get("requested_risk_pct")
+        stop_loss = self._optional_positive_float(payload.get("stop_loss"))
+        take_profit = self._optional_positive_float(payload.get("take_profit"))
+        if stop_loss is not None or take_profit is not None:
+            level_check = self._check_explicit_trade_levels(
+                direction, price, stop_loss, take_profit
+            )
+            if not level_check["pass"]:
+                logger.warning(
+                    f"ORDER REJECTED: {symbol} {action} — {level_check['reason']}"
+                )
+                await self._reject_order_request(
+                    symbol, action, [level_check["reason"]], payload
+                )
+                return
+            sizing = self._calculate_position_size_from_levels(
+                symbol=symbol,
+                direction=direction,
+                entry_price=price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                confidence=confidence,
+                requested_risk_pct=requested_risk_pct,
+            )
+        else:
+            sizing = self._calculate_position_size(
+                symbol=symbol,
+                direction=direction,
+                entry_price=price,
+                atr=atr,
+                confidence=confidence,
+                requested_risk_pct=requested_risk_pct,
+            )
 
         if sizing.risk_reward_ratio + 1e-9 < self.params.min_risk_reward_ratio:
-            logger.warning(
-                f"ORDER REJECTED: {symbol} — R/R {sizing.risk_reward_ratio:.2f} < "
+            reason = (
+                f"R/R {sizing.risk_reward_ratio:.2f} < "
                 f"min {self.params.min_risk_reward_ratio:.2f}"
             )
+            logger.warning(f"ORDER REJECTED: {symbol} — {reason}")
+            await self._reject_order_request(symbol, action, [reason], payload)
             return
 
         # ─── Approve with risk params attached ───────────────────────────────
@@ -267,6 +298,7 @@ class RiskManagementAgent(BaseAgent):
         entry_price: float,
         atr: float,
         confidence: float,
+        requested_risk_pct: Optional[float] = None,
     ) -> PositionSizing:
         """
         Position sizing using ATR-based stops + Kelly fraction.
@@ -301,7 +333,7 @@ class RiskManagementAgent(BaseAgent):
         # Cap position size
         kelly_fraction = min(kelly_fraction, self.params.max_single_position_pct)
 
-        risk_amount = self.portfolio.total_capital * self.params.max_portfolio_risk_pct
+        risk_amount = self.portfolio.total_capital * self._risk_pct(requested_risk_pct)
         position_size_usd = (risk_amount / stop_distance) * entry_price
         position_size_usd = min(
             position_size_usd,
@@ -323,6 +355,115 @@ class RiskManagementAgent(BaseAgent):
             risk_reward_ratio=rr,
             kelly_fraction=kelly_fraction,
         )
+
+    def _calculate_position_size_from_levels(
+        self,
+        symbol: str,
+        direction: str,
+        entry_price: float,
+        stop_loss: float,
+        take_profit: float,
+        confidence: float,
+        requested_risk_pct: Optional[float] = None,
+    ) -> PositionSizing:
+        stop_distance = abs(entry_price - stop_loss)
+        reward_distance = abs(take_profit - entry_price)
+        rr = reward_distance / max(stop_distance, 0.0001)
+
+        b = max(rr, 0.0001)
+        p = confidence
+        q = 1 - p
+        kelly_fraction = max(0.0, (b * p - q) / b) * 0.5
+        kelly_fraction *= self._get_vix_multiplier()
+        kelly_fraction = min(kelly_fraction, self.params.max_single_position_pct)
+
+        risk_amount = self.portfolio.total_capital * self._risk_pct(requested_risk_pct)
+        position_size_usd = (risk_amount / stop_distance) * entry_price
+        position_size_usd = min(
+            position_size_usd,
+            self.portfolio.total_capital * kelly_fraction,
+        )
+        position_size_units = position_size_usd / entry_price
+
+        return PositionSizing(
+            symbol=symbol,
+            direction=direction,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            position_size_units=position_size_units,
+            position_size_usd=position_size_usd,
+            risk_amount_usd=risk_amount,
+            risk_reward_ratio=rr,
+            kelly_fraction=kelly_fraction,
+        )
+
+    async def _reject_order_request(
+        self,
+        symbol: str,
+        action: str,
+        reasons: List[str],
+        original_request: dict,
+    ) -> None:
+        await self.publish(
+            EventType.RISK_BREACH,
+            {
+                "symbol": symbol,
+                "action": action,
+                "signal_id": original_request.get("signal_id")
+                or original_request.get("source_signal_id"),
+                "rejected": True,
+                "reasons": reasons,
+                "original_request": original_request,
+                "portfolio": self.portfolio.to_dict(),
+            },
+            priority=2,
+        )
+
+    def _optional_positive_float(self, value) -> Optional[float]:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+
+    def _check_explicit_trade_levels(
+        self,
+        direction: str,
+        entry_price: float,
+        stop_loss: Optional[float],
+        take_profit: Optional[float],
+    ) -> dict:
+        if stop_loss is None or take_profit is None:
+            return {
+                "pass": False,
+                "reason": "Explicit trade signals require both stop_loss and take_profit",
+            }
+        if abs(entry_price - stop_loss) <= 1e-12:
+            return {"pass": False, "reason": "Stop loss equals entry price"}
+        if direction == "BUY" and not (stop_loss < entry_price < take_profit):
+            return {
+                "pass": False,
+                "reason": "BUY requires stop_loss < entry_price < take_profit",
+            }
+        if direction == "SELL" and not (take_profit < entry_price < stop_loss):
+            return {
+                "pass": False,
+                "reason": "SELL requires take_profit < entry_price < stop_loss",
+            }
+        return {"pass": True, "reason": ""}
+
+    def _risk_pct(self, requested_risk_pct: Optional[float]) -> float:
+        if requested_risk_pct is None:
+            return self.params.max_portfolio_risk_pct
+        try:
+            requested = float(requested_risk_pct)
+        except (TypeError, ValueError):
+            return self.params.max_portfolio_risk_pct
+        requested = requested / 100 if requested > 1 else requested
+        if requested <= 0:
+            return self.params.max_portfolio_risk_pct
+        return min(self.params.max_portfolio_risk_pct, requested)
 
     def _check_kill_switch_conditions(self) -> dict:
         """Auto-trigger kill switch if breach thresholds hit."""

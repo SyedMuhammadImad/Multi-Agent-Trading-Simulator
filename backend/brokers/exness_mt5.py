@@ -103,8 +103,9 @@ class ExnessMT5Config:
         trade_symbols = tuple(s.strip() for s in raw_trade_symbols.split(",") if s.strip())
         raw_symbol_map = os.getenv(
             "EXNESS_SYMBOL_MAP",
-            "BTC-USD:BTCUSDm,ETH-USD:ETHUSDm,EUR-USD:EURUSDm,GBP-USD:GBPUSDm,"
-            "XAUUSD:XAUUSDm,USOIL:USOILm,WTI:USOILm,"
+            "BTC-USD:BTCUSDm,BTCUSD:BTCUSDm,ETH-USD:ETHUSDm,ETHUSD:ETHUSDm,"
+            "EUR-USD:EURUSDm,EURUSD:EURUSDm,GBP-USD:GBPUSDm,GBPUSD:GBPUSDm,"
+            "XAUUSD:XAUUSDm,GOLD:XAUUSDm,USOIL:USOILm,WTI:USOILm,"
             "XAUUSDm:XAUUSDm,EURUSDm:EURUSDm,BTCUSDm:BTCUSDm,USOILm:USOILm",
         )
         return cls(
@@ -552,6 +553,92 @@ class ExnessMT5DemoBroker:
         for position in positions:
             closed.append(self._close_position(position))
         return {"ok": all(item.get("ok") for item in closed), "closed": closed}
+
+    def modify_position_levels(
+        self,
+        *,
+        symbol: str,
+        stop_loss: float,
+        take_profit: float,
+        direction: Optional[str] = None,
+        ticket: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        status = self.connect() if not self._connected else self.status()
+        if not status["connected"]:
+            return {"ok": False, "reason": status.get("last_error") or "broker not connected"}
+        if not self.config.enable_demo_trading:
+            return {"ok": False, "reason": "demo trading is disabled"}
+        if not self._is_demo_account():
+            return {"ok": False, "reason": "connected account is not an MT5 demo account"}
+        if stop_loss <= 0 or take_profit <= 0:
+            return {"ok": False, "reason": "stop_loss and take_profit must be positive"}
+
+        broker_symbol = self._resolve_symbol(symbol)
+        requested_direction = direction.upper() if direction else None
+        positions = self._matching_positions(
+            symbol=broker_symbol,
+            direction=requested_direction,
+            ticket=ticket,
+        )
+        if not positions:
+            return {"ok": False, "reason": f"no matching open position for {broker_symbol}"}
+        if len(positions) > 1:
+            return {"ok": False, "reason": "multiple matching positions; provide ticket"}
+
+        position = _to_dict(positions[0])
+        position_direction = self._position_direction(position)
+        current_price = float(position.get("price_current") or position.get("price_open") or 0)
+        if position_direction == "BUY" and not (stop_loss < current_price < take_profit):
+            return {"ok": False, "reason": "BUY requires stop_loss < current_price < take_profit"}
+        if position_direction == "SELL" and not (take_profit < current_price < stop_loss):
+            return {"ok": False, "reason": "SELL requires take_profit < current_price < stop_loss"}
+
+        request = {
+            "action": getattr(self._mt5, "TRADE_ACTION_SLTP", 6),
+            "position": int(position.get("ticket")),
+            "symbol": broker_symbol,
+            "sl": float(stop_loss),
+            "tp": float(take_profit),
+            "magic": self.config.magic,
+            "comment": "NexusAI demo SLTP",
+        }
+        sent = _to_dict(self._mt5.order_send(request))
+        send_retcode = sent.get("retcode")
+        return {
+            "ok": send_retcode in SUCCESSFUL_SEND_RETCODES,
+            "symbol": broker_symbol,
+            "ticket": position.get("ticket"),
+            "direction": position_direction,
+            "stop_loss": float(stop_loss),
+            "take_profit": float(take_profit),
+            "retcode": send_retcode,
+            "comment": sent.get("comment"),
+            "request": _sanitize_request(request),
+        }
+
+    def _matching_positions(
+        self,
+        *,
+        symbol: str,
+        direction: Optional[str] = None,
+        ticket: Optional[int] = None,
+    ) -> List[Any]:
+        raw_positions = self._mt5.positions_get() or ()
+        matches = []
+        for position in raw_positions:
+            data = _to_dict(position)
+            if str(data.get("symbol", "")).casefold() != symbol.casefold():
+                continue
+            if ticket is not None and int(data.get("ticket") or 0) != int(ticket):
+                continue
+            if direction and self._position_direction(data) != direction:
+                continue
+            matches.append(position)
+        return matches
+
+    def _position_direction(self, position_data: Dict[str, Any]) -> str:
+        buy_type = getattr(self._mt5, "POSITION_TYPE_BUY", 0)
+        return "BUY" if position_data.get("type") == buy_type else "SELL"
 
     def _close_position(self, position: Any) -> Dict[str, Any]:
         data = _to_dict(position)

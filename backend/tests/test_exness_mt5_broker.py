@@ -31,6 +31,25 @@ def test_exness_config_preserves_symbol_case(monkeypatch):
     assert config.symbols == ("XAUUSDm", "EURUSDm", "BTCUSDm")
 
 
+def test_exness_resolves_provider_symbol_aliases(monkeypatch):
+    monkeypatch.delenv("EXNESS_SYMBOL_MAP", raising=False)
+    config = ExnessMT5Config(
+        login=0,
+        password="REDACTED_FOR_PUBLICATION",
+        server="Exness-MT5Trial",
+        terminal_path="",
+        symbols=("XAUUSDm", "EURUSDm", "BTCUSDm", "USOILm"),
+        trade_symbols=("EURUSDm", "XAUUSDm", "USOILm"),
+        symbol_map=ExnessMT5Config.from_env().symbol_map,
+    )
+    broker = ExnessMT5ReadOnlyBroker(config=config, mt5_module=object())
+
+    assert broker.resolve_symbol("EURUSD") == "EURUSDm"
+    assert broker.resolve_symbol("XAUUSD") == "XAUUSDm"
+    assert broker.resolve_symbol("GOLD") == "XAUUSDm"
+    assert broker.resolve_symbol("USOIL") == "USOILm"
+
+
 def test_exness_account_info_masks_login_and_exposes_safe_fields():
     Account = namedtuple(
         "Account",
@@ -44,7 +63,7 @@ def test_exness_account_info_masks_login_and_exposes_safe_fields():
 
         def account_info(self):
             return Account(
-                login=12345678,
+                login=0,
                 server="Exness-MT5Trial",
                 name="Demo User",
                 company="Exness",
@@ -65,8 +84,8 @@ def test_exness_account_info_masks_login_and_exposes_safe_fields():
             return True
 
     config = ExnessMT5Config(
-        login=12345678,
-        password="secret-password",
+        login=0,
+        password="REDACTED_FOR_PUBLICATION",
         server="Exness-MT5Trial",
         terminal_path="",
         symbols=("XAUUSDm",),
@@ -106,8 +125,8 @@ def test_exness_quote_reads_bid_ask_from_mt5():
             return True
 
     config = ExnessMT5Config(
-        login=12345678,
-        password="secret-password",
+        login=0,
+        password="REDACTED_FOR_PUBLICATION",
         server="Exness-MT5Trial",
         terminal_path="",
         symbols=("XAUUSDm",),
@@ -165,8 +184,8 @@ def test_exness_market_data_payload_includes_m1_ohlcv_when_available():
             return (0, "OK")
 
     config = ExnessMT5Config(
-        login=12345678,
-        password="secret-password",
+        login=0,
+        password="REDACTED_FOR_PUBLICATION",
         server="Exness-MT5Trial",
         terminal_path="",
         symbols=("EURUSDm",),
@@ -224,8 +243,8 @@ def test_exness_positions_returns_public_broker_snapshot():
             return (0, "OK")
 
     config = ExnessMT5Config(
-        login=12345678,
-        password="secret-password",
+        login=0,
+        password="REDACTED_FOR_PUBLICATION",
         server="Exness-MT5Trial",
         terminal_path="",
         symbols=("USOILm",),
@@ -273,7 +292,7 @@ def test_exness_demo_order_uses_order_check_and_order_send():
             return True
 
         def account_info(self):
-            return Account(login=12345678, trade_mode=0)
+            return Account(login=0, trade_mode=0)
 
         def symbol_select(self, symbol, enabled):
             self.selected = (symbol, enabled)
@@ -304,8 +323,8 @@ def test_exness_demo_order_uses_order_check_and_order_send():
 
     fake = FakeMT5()
     config = ExnessMT5Config(
-        login=12345678,
-        password="secret-password",
+        login=0,
+        password="REDACTED_FOR_PUBLICATION",
         server="Exness-MT5Trial",
         terminal_path="",
         symbols=("XAUUSDm",),
@@ -355,7 +374,7 @@ def test_exness_demo_order_rejects_when_min_lot_exceeds_approved_risk():
             return True
 
         def account_info(self):
-            return Account(login=12345678, trade_mode=0)
+            return Account(login=0, trade_mode=0)
 
         def symbol_select(self, symbol, enabled):
             return True
@@ -373,8 +392,8 @@ def test_exness_demo_order_rejects_when_min_lot_exceeds_approved_risk():
             return (0, "OK")
 
     config = ExnessMT5Config(
-        login=12345678,
-        password="secret-password",
+        login=0,
+        password="REDACTED_FOR_PUBLICATION",
         server="Exness-MT5Trial",
         terminal_path="",
         symbols=("EURUSDm",),
@@ -404,6 +423,61 @@ def test_exness_demo_order_rejects_when_min_lot_exceeds_approved_risk():
     assert round(result["actual_risk_usd"], 2) > 2.0
 
 
+def test_exness_can_modify_demo_position_levels():
+    Position = namedtuple("Position", "ticket symbol type volume price_open price_current sl tp profit")
+    Account = namedtuple("Account", "login trade_mode")
+
+    class FakeMT5:
+        TRADE_ACTION_SLTP = 6
+        POSITION_TYPE_BUY = 0
+        ACCOUNT_TRADE_MODE_DEMO = 0
+
+        def initialize(self, **kwargs):
+            return True
+
+        def account_info(self):
+            return Account(login=0, trade_mode=0)
+
+        def positions_get(self):
+            return (Position(123, "EURUSDm", 0, 0.01, 1.1589, 1.1589, 1.1585, 1.1594, 0.0),)
+
+        def order_send(self, request):
+            self.sent = request.copy()
+            return SimpleNamespace(retcode=10009, comment="Done")
+
+        def last_error(self):
+            return (0, "OK")
+
+    fake = FakeMT5()
+    config = ExnessMT5Config(
+        login=0,
+        password="REDACTED_FOR_PUBLICATION",
+        server="Exness-MT5Trial",
+        terminal_path="",
+        symbols=("EURUSDm",),
+        symbol_map={"eurusd": "EURUSDm", "eurusdm": "EURUSDm"},
+        enable_demo_trading=True,
+        max_order_volume=0.01,
+        deviation_points=20,
+        magic=260831,
+    )
+    broker = ExnessMT5ReadOnlyBroker(config=config, mt5_module=fake)
+
+    result = broker.modify_position_levels(
+        symbol="EURUSD",
+        direction="BUY",
+        stop_loss=1.1584,
+        take_profit=1.16,
+    )
+
+    assert result["ok"] is True
+    assert fake.sent["action"] == 6
+    assert fake.sent["position"] == 123
+    assert fake.sent["symbol"] == "EURUSDm"
+    assert fake.sent["sl"] == 1.1584
+    assert fake.sent["tp"] == 1.16
+
+
 def test_exness_order_rejects_when_demo_trading_disabled():
     class FakeMT5:
         ACCOUNT_TRADE_MODE_DEMO = 0
@@ -418,8 +492,8 @@ def test_exness_order_rejects_when_demo_trading_disabled():
             return (0, "OK")
 
     config = ExnessMT5Config(
-        login=12345678,
-        password="secret-password",
+        login=0,
+        password="REDACTED_FOR_PUBLICATION",
         server="Exness-MT5Trial",
         terminal_path="",
         symbols=("XAUUSDm",),

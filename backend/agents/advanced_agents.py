@@ -442,24 +442,22 @@ class LearningAgent(BaseAgent):
         latest = max(matching, key=lambda x: x["timestamp"])
         decision = latest["decision"]
         action = decision.get("action", "")
-        reasoning = decision.get("reasoning", [])
+        signal_details = decision.get("signal_details", [])
+        trade_direction = "BUY" if "BUY" in action else "SELL" if "SELL" in action else ""
+        if trade_direction not in {"BUY", "SELL"}:
+            return
 
-        # Determine which agents participated and what they said
-        for reason_str in reasoning:
-            # Parse agent attribution from reasoning strings
-            # Format: "strategy_agent: BUY (75%) → +0.234"
-            parts = reason_str.split(":")
-            if len(parts) < 2:
+        # Use structured signal_details instead of parsing human-readable text.
+        for signal in signal_details:
+            agent_id = signal.get("agent_id")
+            vote = signal.get("direction")
+            if not agent_id or vote not in {"BUY", "SELL"}:
                 continue
-            agent_id = parts[0].strip()
-            agent_voted_buy = "BUY" in reason_str
 
-            # Correct if: agent voted BUY and trade was profitable,
-            #             or agent voted SELL and trade was unprofitable
-            was_correct = (
-                (agent_voted_buy and "BUY" in action and was_profitable) or
-                (not agent_voted_buy and "SELL" in action and not was_profitable)
-            )
+            if was_profitable:
+                was_correct = vote == trade_direction
+            else:
+                was_correct = vote != trade_direction
 
             if agent_id not in self._agent_accuracy:
                 self._agent_accuracy[agent_id] = []

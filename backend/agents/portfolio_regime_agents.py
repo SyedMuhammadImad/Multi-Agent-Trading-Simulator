@@ -37,6 +37,7 @@ class PositionRecord:
     take_profit: float
     opened_at: float
     order_id: str
+    source_signal_id: Optional[str] = None
     broker_ticket: Optional[int] = None
     volume_lots: Optional[float] = None
     margin_required: Optional[float] = None
@@ -79,6 +80,8 @@ class PositionRecord:
             "unrealized_pnl_pct": round(self.unrealized_pnl_pct, 2),
             "opened_at": self.opened_at,
             "order_id": self.order_id,
+            "source_signal_id": self.source_signal_id,
+            "signal_id": self.source_signal_id,
             "broker_ticket": self.broker_ticket,
             "volume_lots": self.volume_lots,
             "margin_required": self.margin_required,
@@ -133,6 +136,7 @@ class PortfolioManagerAgent(BaseAgent):
             take_profit=float(p.get("take_profit", 0)),
             opened_at=time.time(),
             order_id=p.get("order_id", ""),
+            source_signal_id=p.get("signal_id") or p.get("source_signal_id"),
         )
         self._positions[symbol] = position
         logger.info(f"Position tracked: {symbol} {position.direction} @ {position.entry_price}")
@@ -180,7 +184,14 @@ class PortfolioManagerAgent(BaseAgent):
 
         await self.publish(
             EventType.POSITION_CLOSED,
-            {"symbol": symbol, "pnl": pnl, "reason": reason, "trade": trade_record},
+            {
+                "symbol": symbol,
+                "source_signal_id": position.source_signal_id,
+                "signal_id": position.source_signal_id,
+                "pnl": pnl,
+                "reason": reason,
+                "trade": trade_record,
+            },
             priority=3,
         )
 
@@ -227,6 +238,7 @@ class PortfolioManagerAgent(BaseAgent):
                 take_profit=float(p.get("take_profit") or 0),
                 opened_at=float(p.get("time") or time.time()),
                 order_id=str(p.get("ticket") or ""),
+                source_signal_id=p.get("signal_id") or p.get("source_signal_id"),
                 broker_ticket=p.get("ticket"),
                 volume_lots=p.get("volume_lots"),
                 margin_required=p.get("margin_required"),

@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "checks": [
+    "20 initial strategies",
+    "play / pause",
+    "all speeds",
+    "restart",
+    "final statuses / zero survivors / gates",
+    "family / survivors filters; failures retained",
+    "strategy selection",
+    "instrument / timeframe isolation",
+    "desktop/mobile chart and overflow"
+  ],
+  "consoleErrors": [],
+  "source": "real persisted P7 via guarded read-only preview"
+}

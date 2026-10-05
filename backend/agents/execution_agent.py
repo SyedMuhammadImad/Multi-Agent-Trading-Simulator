@@ -1,10 +1,9 @@
 """
-Execution Agent - Turns approved risk assessments into orders.
+Execution Agent — Turns approved risk assessments into real orders.
 
 Supports: Market, Limit, TWAP, VWAP order types.
 In paper mode: simulates fills with realistic slippage model.
-In live mode: requires an injected broker client. The current local broker
-adapter is Exness MT5 demo.
+In live mode: connects to broker API (Alpaca by default).
 
 This is where paper mode diverges from live.
 If your paper PnL doesn't account for slippage + spread, it's a fantasy.
@@ -68,7 +67,6 @@ class Order:
     slippage_bps: float = 0.0
     created_at: float = field(default_factory=time.time)
     source_decision: Optional[dict] = None
-    source_signal_id: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -87,8 +85,6 @@ class Order:
             "fill_timestamp": self.fill_timestamp,
             "slippage_bps": round(self.slippage_bps, 2),
             "created_at": self.created_at,
-            "source_signal_id": self.source_signal_id,
-            "signal_id": self.source_signal_id,
         }
 
 
@@ -102,7 +98,7 @@ class ExecutionAgent(BaseAgent):
     - Order book spread
     - Market impact for size
     
-    Live mode: plug in a broker adapter that implements submit_market_order().
+    Live mode: plug in Alpaca/IBKR/Binance SDK here.
     """
 
     def __init__(self, mode: TradingMode = TradingMode.PAPER):
@@ -160,7 +156,6 @@ class ExecutionAgent(BaseAgent):
             take_profit=sizing["take_profit"],
             risk_amount_usd=sizing.get("risk_amount_usd"),
             source_decision=original.get("orchestrator_decision"),
-            source_signal_id=original.get("signal_id") or payload.get("signal_id"),
         )
 
         self._orders[order.order_id] = order
@@ -244,8 +239,6 @@ class ExecutionAgent(BaseAgent):
                 "stop_loss": order.stop_loss,
                 "take_profit": order.take_profit,
                 "order_id": order.order_id,
-                "source_signal_id": order.source_signal_id,
-                "signal_id": order.source_signal_id,
             },
             priority=3,
         )
@@ -319,8 +312,6 @@ class ExecutionAgent(BaseAgent):
                 "order_id": order.order_id,
                 "broker_order_id": result.get("broker_order_id"),
                 "broker_deal_id": result.get("broker_deal_id"),
-                "source_signal_id": order.source_signal_id,
-                "signal_id": order.source_signal_id,
             },
             priority=3,
         )
@@ -358,7 +349,6 @@ class ExecutionAgent(BaseAgent):
                             EventType.POSITION_CLOSED,
                             {
                                 "symbol": closed.get("symbol"),
-                                "signal_id": closed.get("signal_id"),
                                 "pnl": closed.get("pnl", 0),
                                 "reason": "kill_switch_broker_close",
                                 "trade": closed,
@@ -379,13 +369,7 @@ class ExecutionAgent(BaseAgent):
         self._order_history.append({**order.to_dict(), "reject_reason": reason})
         await self.publish(
             EventType.ORDER_REJECTED,
-            {
-                "order_id": order.order_id,
-                "symbol": order.symbol,
-                "reason": reason,
-                "source_signal_id": order.source_signal_id,
-                "signal_id": order.source_signal_id,
-            },
+            {"order_id": order.order_id, "symbol": order.symbol, "reason": reason},
             priority=3,
         )
 

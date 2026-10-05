@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import ChatLearningPage from "./ChatLearningPage";
 
 // ─── WebSocket hook ────────────────────────────────────────────────────────
 function useWebSocket(url) {
@@ -148,8 +147,7 @@ function AgentMonitor({ agents }) {
 function TradeLog({ events }) {
   const relevant = events.filter(e =>
     ["order.filled", "order.rejected", "risk.breach", "risk.kill_switch",
-     "strategy.signal", "sentiment.signal", "macro.signal", "trade_signal.accepted",
-     "trade_signal.rejected", "position.modified"].includes(e.event_type)
+     "strategy.signal", "sentiment.signal", "macro.signal"].includes(e.event_type)
   ).slice(-40).reverse();
 
   const colors = {
@@ -160,9 +158,6 @@ function TradeLog({ events }) {
     "strategy.signal": "text-cyan-400",
     "sentiment.signal": "text-violet-400",
     "macro.signal": "text-blue-400",
-    "trade_signal.accepted": "text-emerald-300",
-    "trade_signal.rejected": "text-red-300",
-    "position.modified": "text-cyan-300",
   };
   const icons = {
     "order.filled": "✓",
@@ -172,9 +167,6 @@ function TradeLog({ events }) {
     "strategy.signal": "↑",
     "sentiment.signal": "◈",
     "macro.signal": "◆",
-    "trade_signal.accepted": "✓",
-    "trade_signal.rejected": "✗",
-    "position.modified": "↕",
   };
 
   return (
@@ -615,67 +607,8 @@ function BrokerPanel({ status, setStatus }) {
   );
 }
 
-
-function TradeAuditPanel({ audit }) {
-  const rows = audit?.audits || [];
-  return (
-    <Panel title="Trade Audit" className="md:col-span-3">
-      <div className="overflow-x-auto">
-        <table className="w-full font-mono text-[11px]">
-          <thead>
-            <tr className="text-zinc-600 uppercase text-[10px] tracking-wider border-b border-zinc-900">
-              <th className="px-4 py-2 text-left">Signal</th>
-              <th className="px-4 py-2 text-left">Parse</th>
-              <th className="px-4 py-2 text-left">Risk</th>
-              <th className="px-4 py-2 text-left">Execution</th>
-              <th className="px-4 py-2 text-right">P&L</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.slice(0, 20).map(row => {
-              const parser = row.parser || {};
-              const learning = row.learning || {};
-              const riskStatus = row.risk_submission?.status || (row.image_status === "PARSED" ? "READY" : row.image_status);
-              const eventTypes = (row.execution_events || []).map(e => e.event_type).slice(0, 2).join(", ");
-              return (
-                <tr key={row.signal_id} className="border-b border-zinc-900 hover:bg-zinc-900/40">
-                  <td className="px-4 py-2 text-zinc-300">
-                    <div>{parser.instrument || "--"} {parser.direction || ""}</div>
-                    <div className="text-zinc-600 truncate max-w-60">{row.extraction?.normalized_text || "--"}</div>
-                  </td>
-                  <td className={parser.status === "PARSED" || parser.status === "ACCEPTED" ? "px-4 py-2 text-emerald-400" : "px-4 py-2 text-amber-400"}>
-                    {parser.status || "--"}
-                  </td>
-                  <td className="px-4 py-2 text-zinc-400">{riskStatus || "--"}</td>
-                  <td className="px-4 py-2 text-zinc-400">{learning.execution_status || eventTypes || "--"}</td>
-                  <td className={(learning.pnl || 0) >= 0 ? "px-4 py-2 text-right text-emerald-400" : "px-4 py-2 text-right text-red-400"}>
-                    {learning.pnl == null ? "--" : formatSignedCurrency(learning.pnl)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {!rows.length && (
-          <div className="text-center text-zinc-600 text-xs py-8 font-mono">No uploaded image signals in audit trail</div>
-        )}
-      </div>
-    </Panel>
-  );
-}
-
 // ─── Main App ─────────────────────────────────────────────────────────────
 export default function App() {
-  const [page, setPage] = useState(window.location.hash);
-  useEffect(() => {
-    const update = () => setPage(window.location.hash);
-    window.addEventListener("hashchange", update);
-    return () => window.removeEventListener("hashchange", update);
-  }, []);
-  return page.startsWith("#/chat-learning") ? <ChatLearningPage /> : <TradingDashboard />;
-}
-
-function TradingDashboard() {
   const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
   const { events, snapshot, connected } = useWebSocket(WS_URL);
 
@@ -688,7 +621,6 @@ function TradingDashboard() {
   const [equitySpark, setEquitySpark] = useState([]);
   const [killActive, setKillActive] = useState(false);
   const [exnessStatus, setExnessStatus] = useState(null);
-  const [tradeAudit, setTradeAudit] = useState(null);
 
   // Hydrate from snapshot
   useEffect(() => {
@@ -729,8 +661,6 @@ function TradingDashboard() {
       if (sent?.current_sentiment) setSentiment(sent.current_sentiment);
       if (dec?.recent_decisions) setDecisions(dec.recent_decisions);
       if (broker?.broker) setExnessStatus(broker);
-      const audit = await apiFetch("/private/trade-audit?limit=12");
-      if (audit?.audits) setTradeAudit(audit);
     };
     poll();
     const t = setInterval(poll, 2000);
@@ -822,10 +752,6 @@ function TradingDashboard() {
         </div>
       </header>
 
-      <nav className="px-6 py-3 border-b border-zinc-800 text-sm flex gap-6" aria-label="Main navigation">
-        <a href="#/" aria-current="page" className="text-cyan-400">Trading dashboard</a>
-        <a href="#/chat-learning" className="text-zinc-300 hover:text-white">Chat learning</a>
-      </nav>
       {/* Main grid */}
       <main className="p-4 space-y-4">
         {/* Metrics row */}
@@ -870,13 +796,7 @@ function TradingDashboard() {
         {/* Bottom row: Positions + Decisions + Controls */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <PositionsPanel portfolio={portfolio} />
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <TradeAuditPanel audit={tradeAudit} />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Decision log */}
           <Panel title="Orchestrator Decisions">
             <div className="overflow-y-auto max-h-48 font-mono text-[11px]">

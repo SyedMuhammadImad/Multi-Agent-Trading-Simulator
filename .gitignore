@@ -21,35 +21,17 @@ npm-debug.log*
 yarn-error.log*
 
 # Secrets / Env
-# Approved runtime secrets: local .env variants and backend/private/ only.
-# Keep reviewed placeholder templates trackable; never store real secrets there.
 .env
 .env.*
 !.env.example
 
 # Runtime data and databases
-/research/p5-market-data/
-/research/p8-intelligence/
-/.p3-verification/
 *.db
 *.sqlite
 *.sqlite3
 *.db-journal
-*.db-wal
-*.db-shm
-*.sqlite3-wal
-*.sqlite3-shm
-*.sqlite3-journal
-.pytest_cache/
-backend/data/lifecycle/
 backend/data/*.db
 backend/data/*.db-journal
-backend/data/private_*
-backend/models/checkpoints/
-backend/private/
-
-# Local Obsidian UI/config state; no cross-machine settings approved for tracking.
-/knowledge/.obsidian/
 
 # OS / Editor
 .DS_Store
@@ -63,47 +45,3 @@ Thumbs.db
 logs/
 tmp/
 temp/
-
-# Publication exclusions
-.env
-.env.*
-!.env.example
-!.env.sample
-!.env.template
-**/private/
-**/credentials/
-**/sessions/
-**/node_modules/
-**/.venv/
-**/__pycache__/
-**/.ipynb_checkpoints/
-*.pem
-*.key
-*.p12
-*.pfx
-*.zip
-*.7z
-*.rar
-*.db
-*.sqlite*
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.webp
-*.svg
-*.ico
-*.bmp
-*.heic
-*.tiff
-*.mp4
-*.mov
-*.mkv
-*.avi
-*.webm
-*.pdf
-*.docx
-*.pptx
-*.pbix
-*.pkt
-*.pka
